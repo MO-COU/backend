@@ -34,6 +34,7 @@
 패키지 소유권 규칙은 [CONTRIBUTING.md](./CONTRIBUTING.md)를 참고.
 
 </details>
+
 ## 시작하기
 
 ### 1. 사전 준비
