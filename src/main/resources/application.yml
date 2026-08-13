@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: mocou-backend
+  profiles:
+    active: local
+  flyway:
+    locations: classpath:db/migration
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info

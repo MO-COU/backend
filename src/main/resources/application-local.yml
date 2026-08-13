@@ -1,0 +1,19 @@
+# docker-compose(로컬)용 공용 설정 - 팀 전체가 동일하게 사용, 시크릿 없음
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mocou?characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+    username: mocou
+    password: mocou
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+logging:
+  level:
+    com.mocou: DEBUG

@@ -1,0 +1,36 @@
+name: 이슈 등록
+description: 기능, 버그, 리팩토링 등 모든 작업을 등록한다
+body:
+  - type: markdown
+    attributes:
+      value: |
+        이슈를 만든 뒤 오른쪽 사이드바에서 **라벨**을 지정한다.
+        `feature` `bug` `refactor` `test` `docs` `chore` 중 하나를 고르고,
+        그 값을 그대로 브랜치 타입과 커밋 타입으로 쓴다.
+
+  - type: textarea
+    id: overview
+    attributes:
+      label: 개요
+      description: 무슨 작업인지, 왜 필요한지 적는다. 버그라면 어떤 상황에서 어떻게 잘못되는지 적는다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: todo
+    attributes:
+      label: 할 일
+      description: 최대한 세분화해서 적고, 작업하면서 체크해 나간다.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: etc
+    attributes:
+      label: 참고
+      description: 재현 방법, 에러 로그, API 명세, 관련 이슈 등
+    validations:
+      required: false
