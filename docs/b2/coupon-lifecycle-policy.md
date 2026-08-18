@@ -52,6 +52,7 @@ Idempotency-Key: <클라이언트 생성 키>
 ```
 
 - 멱등성 범위는 `(coupon_issue_id, idempotency_key)`다.
+- 멱등성 키는 대소문자를 구분해 원문 그대로 비교한다.
 - 같은 키와 같은 요청은 최초 성공 결과를 다시 반환한다.
 - 같은 키를 다른 요청에 사용하면 `IDEMPOTENCY_CONFLICT`를 반환한다.
 - 다른 키로 완료된 상태를 변경하려 하면 `INVALID_STATE_TRANSITION`을 반환한다.
