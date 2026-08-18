@@ -6,6 +6,20 @@
 
 관련 기능은 `F-STS-001`~`F-STS-004`이며, 원본 요구사항은 [구글 시트](https://docs.google.com/spreadsheets/d/1nB1hoAxqKC8wdWSc1fMKlG0xPMSquvXcf18okI1ejxw/edit?gid=241366860#gid=241366860)에서 관리한다.
 
+## B2 담당 범위
+
+B2는 발급이 끝난 쿠폰의 생명주기를 관리한다. 쿠폰 발급과 최초 `NULL → ISSUED` 이력은 A팀의 책임이며, B2는 이후의 사용·만료 전이와 상태 이력을 처리한다.
+
+| 기능 | 책임 |
+| --- | --- |
+| 쿠폰 사용 | 유효한 `ISSUED` 쿠폰을 `USED`로 전이 |
+| 상태 이력 | 모든 성공 전이에 이력 한 건 기록 |
+| 멱등성 | 같은 요청의 재처리 방지와 최초 결과 반환 |
+| 만료 검사 | 만료 시각 이후 사용 요청 거부 |
+| 만료 배치 | 만료된 `ISSUED` 쿠폰을 `EXPIRED`로 일괄 전이 |
+
+일반 조회와 쿠폰 발급은 B2 범위가 아니다.
+
 ## 상태와 전이
 
 `미발급`은 `coupon_issue` 행이 없는 상태다. 저장 상태는 `ISSUED`, `USED`, `EXPIRED`만 사용하며 `USED`, `EXPIRED`는 최종 상태다.
@@ -22,8 +36,6 @@
 A팀은 발급 트랜잭션에서 `coupon_issue` 생성과 `NULL → ISSUED` 최초 이력 기록을 함께 처리한다. 최초 이력의 멱등성 키는 `ISSUE:{couponIssueId}`를 사용한다.
 
 B2는 발급 이후 `ISSUED → USED`, `ISSUED → EXPIRED` 전이와 이력을 담당한다.
-
-> A팀과 최초 이력 책임을 확인한 뒤 이 문서의 전제를 확정한다.
 
 ## 시간과 만료
 
@@ -51,6 +63,16 @@ POST /api/v1/coupon-issues/{issueId}/use
 Idempotency-Key: <클라이언트 생성 키>
 ```
 
+성공 응답 예시:
+
+```json
+{
+  "couponIssueId": 42,
+  "status": "USED",
+  "usedAt": "2026-08-18T17:30:00"
+}
+```
+
 - 멱등성 범위는 `(coupon_issue_id, idempotency_key)`다.
 - 멱등성 키는 대소문자를 구분해 원문 그대로 비교한다.
 - 같은 키와 같은 요청은 최초 성공 결과를 다시 반환한다.
@@ -70,6 +92,15 @@ Idempotency-Key: <클라이언트 생성 키>
 
 현재 `coupon_issue_history` 스키마를 그대로 사용한다. 1차 MVP에서는 신규 이력 컬럼을 추가하지 않는다.
 
+## 처리 흐름
+
+```text
+사용 요청 → 멱등성 이력 확인 → 조건부 USED 갱신 → USED 이력 저장 → 결과 반환
+만료 배치 → cutoffAt 고정 → 만료 후보 청크 조회 → 조건부 EXPIRED 갱신 → EXPIRED 이력 저장
+```
+
+조건부 갱신에 실패한 경우 현재 상태와 이력을 다시 확인한다. 다른 전이가 먼저 성공했으면 해당 상태에 맞는 결과 또는 오류를 반환하며, 새 이력은 만들지 않는다.
+
 ## 만료 배치
 
 - Spring Batch로 1분마다 실행하며, 주기와 청크 크기는 설정값으로 분리한다.
@@ -83,9 +114,28 @@ Idempotency-Key: <클라이언트 생성 키>
 
 만료 이력의 멱등성 키는 `EXPIRE:{couponIssueId}:{expiresAt}`를 사용한다.
 
-## B1 데이터 계약
+### 실행 설정
 
-- B1은 고정된 데이터 생성 기준 시각과 시드값으로 데이터를 만든다.
+| 설정 | 기본값 | 설명 |
+| --- | ---: | --- |
+| `mocou.lifecycle.expiration.fixed-delay-ms` | `60000` | 이전 실행 완료 후 다음 실행까지의 대기 시간(ms) |
+| `mocou.lifecycle.expiration.chunk-size` | `1000` | 하나의 트랜잭션에서 처리할 최대 만료 후보 수 |
+
+스케줄러는 `couponExpirationJob`을 실행한다. 실행 중인 Job이 있으면 해당 주기는 건너뛴다. 가장 최근 실행이 실패했다면 새 `cutoffAt`을 만들지 않고 실패한 Job을 재시작한다.
+
+## 코드와 테스트 위치
+
+- 사용 API·서비스·저장소: `CouponUseController`, `CouponUseService`, `JdbcCouponUseRepository`
+- 만료 전이: `CouponExpirationService`, `JdbcCouponExpirationRepository`
+- 만료 배치: `CouponExpirationBatchConfig`, `CouponExpirationTasklet`, `CouponExpirationScheduler`
+- 단위 테스트: `CouponUseServiceTest`, `CouponExpirationServiceTest`, `CouponExpirationTaskletTest`, `CouponExpirationSchedulerTest`
+- MySQL 통합 테스트: `CouponUseIntegrationTest`, `CouponExpirationIntegrationTest`, `CouponExpirationBatchTest`
+
+전체 테스트는 `./gradlew test`로 실행한다.
+
+## 테스트 데이터 전제
+
+- B1이 생성하는 데이터는 고정된 기준 시각과 시드값을 사용한다.
 - `expires_at = issued_at + 14일` 규칙을 적용한다.
 - `ISSUED`는 만료 전이고 `used_at`이 없다.
 - `USED`는 `issued_at <= used_at < expires_at`을 만족한다.
