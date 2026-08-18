@@ -6,13 +6,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers
 public abstract class MySqlContainerTest {
 
-    @Container
     private static final MySQLContainer<?> MYSQL =
             new MySQLContainer<>("mysql:8.0")
                     .withDatabaseName("mocou")
@@ -20,6 +16,10 @@ public abstract class MySqlContainerTest {
                     .withPassword("mocou")
                     .withEnv("TZ", "Asia/Seoul")
                     .withCommand("--log-bin-trust-function-creators=1");
+
+    static {
+        MYSQL.start();
+    }
 
     @Autowired protected JdbcTemplate jdbcTemplate;
 
