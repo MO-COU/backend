@@ -1,6 +1,7 @@
 package com.mocou.issue;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -35,6 +36,12 @@ public class RedisCouponIssueGateway {
                             "scripts/redis/reserve-coupon.lua"),
                     Long.class);
 
+    private static final RedisScript<Long> RESERVE_AND_APPEND_EVENT_SCRIPT =
+            RedisScript.of(
+                    new ClassPathResource(
+                            "scripts/redis/reserve-and-append-event.lua"),
+                    Long.class);
+
     private static final RedisScript<Long> COMPENSATE_SCRIPT =
             RedisScript.of(
                     new ClassPathResource(
@@ -51,11 +58,37 @@ public class RedisCouponIssueGateway {
 
         Long result = redisTemplate.execute(
                 RESERVE_SCRIPT,
-                createCouponKeys(couponId),
+                createReservationKeys(couponId),
                 Long.toString(memberId));
 
         if (result == null) {
             throw new IllegalStateException("Redis reservation script returned null.");
+        }
+
+        return toReservationResult(result);
+    }
+
+    public CouponReservationResult reserveAndAppendEvent(
+            long couponId,
+            long memberId,
+            UUID eventId
+    ) {
+        validateMemberId(memberId);
+
+        if (eventId == null) {
+            throw new IllegalArgumentException(
+                    "eventId는 필수입니다.");
+        }
+
+        Long result = redisTemplate.execute(
+                RESERVE_AND_APPEND_EVENT_SCRIPT,
+                createReservationAndStreamKeys(couponId),
+                Long.toString(memberId),
+                eventId.toString(),
+                Long.toString(couponId));
+
+        if (result == null) {
+            throw new IllegalStateException("Redis reservation and stream script returned null.");
         }
 
         return toReservationResult(result);
@@ -69,9 +102,8 @@ public class RedisCouponIssueGateway {
 
         Long result = redisTemplate.execute(
                 COMPENSATE_SCRIPT,
-                createCouponKeys(couponId),
-                Long.toString(memberId)
-                );
+                createCompensationKeys(couponId),
+                Long.toString(memberId));
 
         if (result == null) {
             throw new IllegalStateException("Redis compensation script returned null.");
@@ -80,12 +112,25 @@ public class RedisCouponIssueGateway {
         return toCompensationResult(result);
     }
 
-    private List<String> createCouponKeys(long couponId) {
+    private List<String> createReservationKeys(long couponId) {
         return List.of(
                 CouponRedisKey.stock(couponId),
                 CouponRedisKey.issuedMembers(couponId),
-                CouponRedisKey.metadata(couponId)
-               );
+                CouponRedisKey.metadata(couponId));
+    }
+
+    private List<String> createReservationAndStreamKeys(long couponId) {
+        return List.of(
+                CouponRedisKey.stock(couponId),
+                CouponRedisKey.issuedMembers(couponId),
+                CouponRedisKey.metadata(couponId),
+                CouponRedisKey.issueStream(couponId));
+    }
+
+    private List<String> createCompensationKeys(long couponId) {
+        return List.of(
+                CouponRedisKey.stock(couponId),
+                CouponRedisKey.issuedMembers(couponId));
     }
 
     private CouponReservationResult toReservationResult(long result) {

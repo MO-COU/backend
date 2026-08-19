@@ -22,6 +22,14 @@ public final class CouponRedisKey {
         return "coupon:{%d}:metadata".formatted(couponId);
     }
 
+    /**
+     * 쿠폰 발급 예약 이벤트를 저장하는 Redis Stream Key.
+     */
+    public static String issueStream(long couponId) {
+        validateCouponId(couponId);
+        return "coupon:{%d}:issue-stream".formatted(couponId);
+    }
+
     private static void validateCouponId(long couponId) {
         if (couponId <= 0) {
             throw new IllegalArgumentException("couponId는 양수여야 합니다.");
