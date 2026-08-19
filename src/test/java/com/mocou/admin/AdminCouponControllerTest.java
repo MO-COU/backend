@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.mocou.global.exception.GlobalExceptionHandler;
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -85,6 +87,19 @@ class AdminCouponControllerTest {
                 .andExpect(jsonPath("$.data.remainingQuantity").value(2_000))
                 .andExpect(jsonPath("$.data.status").value("OPEN"))
                 .andExpect(jsonPath("$.data.updatedAt").value("2026-08-19T15:00:00"));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 쿠폰은 공통 404 응답을 반환한다")
+    void returnsNotFoundForMissingCoupon() throws Exception {
+        given(service.getStock(COUPON_ID))
+                .willThrow(new BusinessException(ErrorCode.COUPON_NOT_FOUND));
+
+        mockMvc.perform(get("/api/admin/coupons/{couponId}/stock", COUPON_ID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("COUPON_NOT_FOUND"))
+                .andExpect(jsonPath("$.error.message").value("존재하지 않는 쿠폰입니다"));
     }
 
 }

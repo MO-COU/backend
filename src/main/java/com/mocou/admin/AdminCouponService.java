@@ -37,9 +37,7 @@ public class AdminCouponService {
         return repository
                 .findStock(couponId)
                 .orElseThrow(
-                        () ->
-                                new BusinessException(
-                                        ErrorCode.INVALID_INPUT, "존재하지 않는 쿠폰입니다"));
+                        () -> new BusinessException(ErrorCode.COUPON_NOT_FOUND));
     }
 
     private void validateRequest(long couponId, int page, int size) {
@@ -57,7 +55,7 @@ public class AdminCouponService {
 
     private void validateCouponExists(long couponId) {
         if (!repository.existsCoupon(couponId)) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "존재하지 않는 쿠폰입니다");
+            throw new BusinessException(ErrorCode.COUPON_NOT_FOUND);
         }
     }
 

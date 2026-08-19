@@ -44,14 +44,14 @@ return ApiResponse.success();      // 데이터 없는 성공 (상태 변경 API
 
 **`ErrorCode`**: 실패 케이스를 코드로 모아둔 enum입니다. **새로운 실패 상황이 생기면 각자 문자열을 만들지 말고 여기에 항목을 추가**해주세요 (HTTP 상태코드 + 기본 메시지를 같이 들고 있습니다).
 
-현재 정의된 코드: `INVALID_INPUT`, `METHOD_NOT_ALLOWED`, `SOLD_OUT`, `DUPLICATE`, `NOT_MEMBER`, `NOT_OPEN_YET`, `SYSTEM_ERROR`
+현재 정의된 코드: `INVALID_INPUT`, `METHOD_NOT_ALLOWED`, `COUPON_NOT_FOUND`, `SOLD_OUT`, `DUPLICATE`, `NOT_MEMBER`, `NOT_OPEN_YET`, `SYSTEM_ERROR`
 
-팀원들이 더 추가할 예정 : ex)`COUPON_NOT_FOUND`, `SERVICE_UNAVAILABLE`, `INVALID_STATE_TRANSITION`/`ISSUE_NOT_FOUND` `COUPON_EXPIRED`
+팀원들이 더 추가할 예정 : ex)`SERVICE_UNAVAILABLE`, `INVALID_STATE_TRANSITION`, `ISSUE_NOT_FOUND`, `COUPON_EXPIRED`
 
 **`BusinessException`**: "버그가 아니라 예상된 실패"임을 표현하는 예외입니다. 서비스 로직에서 이렇게 던지면 됩니다.
 ```java
 if (coupon == null) {
-    throw new BusinessException(ErrorCode.NOT_MEMBER);
+    throw new BusinessException(ErrorCode.COUPON_NOT_FOUND);
 }
 ```
 컨트롤러에서 try-catch로 잡을 필요가 없습니다 — 아래 핸들러가 대신 처리합니다.

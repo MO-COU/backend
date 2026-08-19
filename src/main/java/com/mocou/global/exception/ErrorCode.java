@@ -17,6 +17,7 @@ public enum ErrorCode {
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 HTTP 메서드입니다"),
 
     // 쿠폰
+    COUPON_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 쿠폰입니다"),
     SOLD_OUT(HttpStatus.CONFLICT, "재고가 소진되었습니다"),
     DUPLICATE(HttpStatus.CONFLICT, "이미 발급받은 쿠폰입니다"),
     NOT_OPEN_YET(HttpStatus.CONFLICT, "아직 발급 시작 전입니다"),

@@ -86,8 +86,21 @@ class AdminCouponServiceTest {
                         BusinessException.class,
                         exception ->
                                 assertThat(exception.getErrorCode())
-                                        .isEqualTo(ErrorCode.INVALID_INPUT));
+                                        .isEqualTo(ErrorCode.COUPON_NOT_FOUND));
         verify(repository, never()).countIssues(COUPON_ID);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 쿠폰의 재고 조회를 거부한다")
+    void rejectsMissingCouponStock() {
+        given(repository.findStock(COUPON_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getStock(COUPON_ID))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.COUPON_NOT_FOUND));
     }
 
     @Test
