@@ -12,7 +12,7 @@ public class CouponExpirationBatchProperties {
     private long fixedDelayMs = 60_000;
 
     @Min(1)
-    private int chunkSize = 1_000;
+    private int chunkSize = 5_000;
 
     public long getFixedDelayMs() {
         return fixedDelayMs;
