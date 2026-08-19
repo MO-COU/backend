@@ -78,6 +78,8 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// 로컬/CI 테스트 JVM 기본값(UTC)을 Asia/Seoul로 고정
+	systemProperty("user.timezone", "Asia/Seoul")
 }
 
 sourceSets {
