@@ -4,17 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.BDDMockito.given;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.InjectMocks;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -25,130 +26,153 @@ class CouponUseServiceTest {
     private static final LocalDateTime USED_AT = LocalDateTime.of(2026, 8, 18, 15, 30);
 
     @Mock private CouponUseRepository repository;
-
-    private CouponUseService service;
-
-    @BeforeEach
-    void setUp() {
-        service = new CouponUseService(repository);
-    }
+    @InjectMocks private CouponUseService service;
 
     @Test
+    @DisplayName("발급 쿠폰을 사용 처리하고 이력을 저장한다")
     void usesIssuedCouponAndRecordsHistory() {
-        when(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
-        when(repository.markUsed(ISSUE_ID)).thenReturn(1);
-        when(repository.findIssue(ISSUE_ID))
-                .thenReturn(
+        // given
+        given(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
+                .willReturn(Optional.empty());
+        given(repository.markUsed(ISSUE_ID)).willReturn(1);
+        given(repository.findIssue(ISSUE_ID))
+                .willReturn(
                         Optional.of(
                                 new CouponIssueState(
                                         ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
 
+        // when
         CouponUseResult result = service.use(ISSUE_ID, IDEMPOTENCY_KEY);
 
+        // then
         assertThat(result)
                 .isEqualTo(new CouponUseResult(ISSUE_ID, CouponIssueStatus.USED, USED_AT));
         verify(repository).saveUsedHistory(ISSUE_ID, IDEMPOTENCY_KEY);
     }
 
     @Test
+    @DisplayName("같은 멱등성 키 요청은 기존 성공 결과를 반환한다")
     void returnsExistingSuccessForRepeatedKey() {
-        when(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
-                .thenReturn(Optional.of(CouponIssueStatus.USED));
-        when(repository.findIssue(ISSUE_ID))
-                .thenReturn(
+        // given
+        given(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
+                .willReturn(Optional.of(CouponIssueStatus.USED));
+        given(repository.findIssue(ISSUE_ID))
+                .willReturn(
                         Optional.of(
                                 new CouponIssueState(
                                         ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
 
+        // when
         CouponUseResult result = service.use(ISSUE_ID, IDEMPOTENCY_KEY);
 
+        // then
         assertThat(result.usedAt()).isEqualTo(USED_AT);
         verify(repository, never()).markUsed(ISSUE_ID);
         verify(repository, never()).saveUsedHistory(ISSUE_ID, IDEMPOTENCY_KEY);
     }
 
     @Test
+    @DisplayName("다른 상태 전이에 사용된 멱등성 키는 충돌로 거부한다")
     void rejectsKeyPreviouslyUsedForAnotherTransition() {
-        when(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
-                .thenReturn(Optional.of(CouponIssueStatus.EXPIRED));
+        // given
+        given(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
+                .willReturn(Optional.of(CouponIssueStatus.EXPIRED));
 
+        // when, then
         assertError(CouponUseErrorCode.IDEMPOTENCY_CONFLICT);
 
         verify(repository, never()).markUsed(ISSUE_ID);
     }
 
     @Test
+    @DisplayName("발급 쿠폰이 없으면 오류를 반환한다")
     void rejectsMissingIssue() {
-        when(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
-        when(repository.markUsed(ISSUE_ID)).thenReturn(0);
-        when(repository.findIssue(ISSUE_ID)).thenReturn(Optional.empty());
+        // given
+        given(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
+                .willReturn(Optional.empty());
+        given(repository.markUsed(ISSUE_ID)).willReturn(0);
+        given(repository.findIssue(ISSUE_ID)).willReturn(Optional.empty());
 
+        // when, then
         assertError(CouponUseErrorCode.ISSUE_NOT_FOUND);
     }
 
     @Test
+    @DisplayName("만료된 발급 쿠폰은 사용할 수 없다")
     void rejectsExpiredIssuedCoupon() {
-        when(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
-        when(repository.markUsed(ISSUE_ID)).thenReturn(0);
-        when(repository.findIssue(ISSUE_ID))
-                .thenReturn(
+        // given
+        given(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
+                .willReturn(Optional.empty());
+        given(repository.markUsed(ISSUE_ID)).willReturn(0);
+        given(repository.findIssue(ISSUE_ID))
+                .willReturn(
                         Optional.of(
                                 new CouponIssueState(
                                         ISSUE_ID, CouponIssueStatus.ISSUED, null, true)));
 
+        // when, then
         assertError(CouponUseErrorCode.COUPON_EXPIRED);
     }
 
     @Test
+    @DisplayName("이미 사용된 쿠폰은 다른 키로 전이할 수 없다")
     void rejectsTransitionFromTerminalStateWithAnotherKey() {
-        when(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
-        when(repository.markUsed(ISSUE_ID)).thenReturn(0);
-        when(repository.findIssue(ISSUE_ID))
-                .thenReturn(
+        // given
+        given(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
+                .willReturn(Optional.empty());
+        given(repository.markUsed(ISSUE_ID)).willReturn(0);
+        given(repository.findIssue(ISSUE_ID))
+                .willReturn(
                         Optional.of(
                                 new CouponIssueState(
                                         ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
 
+        // when, then
         assertError(CouponUseErrorCode.INVALID_STATE_TRANSITION);
     }
 
     @Test
+    @DisplayName("만료 완료 상태는 만료 쿠폰 오류로 반환한다")
     void rejectsExpiredTerminalStateAsExpiredCoupon() {
-        when(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty());
-        when(repository.markUsed(ISSUE_ID)).thenReturn(0);
-        when(repository.findIssue(ISSUE_ID))
-                .thenReturn(
+        // given
+        given(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
+                .willReturn(Optional.empty());
+        given(repository.markUsed(ISSUE_ID)).willReturn(0);
+        given(repository.findIssue(ISSUE_ID))
+                .willReturn(
                         Optional.of(
                                 new CouponIssueState(
                                         ISSUE_ID, CouponIssueStatus.EXPIRED, null, true)));
 
+        // when, then
         assertError(CouponUseErrorCode.COUPON_EXPIRED);
     }
 
     @Test
+    @DisplayName("경쟁 요청이 먼저 성공하면 그 결과를 반환한다")
     void seesConcurrentSuccessBeforeResolvingFailedUpdate() {
-        when(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
-                .thenReturn(Optional.empty())
-                .thenReturn(Optional.of(CouponIssueStatus.USED));
-        when(repository.markUsed(ISSUE_ID)).thenReturn(0);
-        when(repository.findIssue(ISSUE_ID))
-                .thenReturn(
+        // given
+        given(repository.findHistoryTargetStatus(ISSUE_ID, IDEMPOTENCY_KEY))
+                .willReturn(Optional.empty())
+                .willReturn(Optional.of(CouponIssueStatus.USED));
+        given(repository.markUsed(ISSUE_ID)).willReturn(0);
+        given(repository.findIssue(ISSUE_ID))
+                .willReturn(
                         Optional.of(
                                 new CouponIssueState(
                                         ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
 
+        // when
         CouponUseResult result = service.use(ISSUE_ID, IDEMPOTENCY_KEY);
 
+        // then
         assertThat(result.usedAt()).isEqualTo(USED_AT);
     }
 
     @Test
+    @DisplayName("0 이하 발급 ID는 입력 오류로 거부한다")
     void rejectsNonPositiveIssueId() {
+        // when, then
         assertThatThrownBy(() -> service.use(0, IDEMPOTENCY_KEY))
                 .isInstanceOfSatisfying(
                         CouponUseException.class,
@@ -158,7 +182,9 @@ class CouponUseServiceTest {
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {" ", "                                                                x"})
+    @DisplayName("유효하지 않은 멱등성 키는 입력 오류로 거부한다")
     void rejectsInvalidIdempotencyKey(String key) {
+        // when, then
         assertThatThrownBy(() -> service.use(ISSUE_ID, key))
                 .isInstanceOfSatisfying(
                         CouponUseException.class,
