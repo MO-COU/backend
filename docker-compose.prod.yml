@@ -1,0 +1,58 @@
+# EC2 배포용 Compose 파일.
+# mysql/redis는 app 컨테이너만 같은 docker 네트워크 안에서 서비스명(mysql, redis)으로 접근함.
+# 실행 전 .env 파일을 EC2 서버에 올려야 함.
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mocou-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: mocou
+      MYSQL_USER: mocou
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Seoul
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8.8-alpine
+    container_name: mocou-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Dockerfile로 빌드된 이미지
+  app:
+    image: ghcr.io/mo-cou/backend:latest
+    container_name: mocou-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/mocou?characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+      SPRING_DATASOURCE_USERNAME: mocou
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_APP_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+    ports:
+      - "8080:8080"
+
+volumes:
+  mysql-data:
+  redis-data:
