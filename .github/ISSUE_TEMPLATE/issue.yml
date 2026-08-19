@@ -1,13 +1,13 @@
 name: 이슈 등록
-description: 기능, 버그, 리팩토링 등 모든 작업을 등록한다
+description: 기능 추가, 버그 수정, 리팩토링 등 모든 작업 등록
 body:
   - type: markdown
     attributes:
       value: |
-        이슈를 만든 뒤 오른쪽 사이드바에서 **라벨**을 지정한다.
-        `feature` `bug` `refactor` `test` `docs` `chore` 중 하나를 고르고,
-        그 값을 그대로 브랜치 타입과 커밋 타입으로 쓴다.
-
+        1. 맨 아래 Assignee에 본인 등록
+        2. 맨 아래 Label 고르기 `Feature` `Bug` `Refactor` `Test` `Docs` `Chore` `Deploy` 선택
+        3. 그 값을 브랜치명으로 ex) feature/00-example
+        이슈 생성 -> 브랜치 생성 -> 작업 -> PR 생성 -> Merge
   - type: textarea
     id: overview
     attributes:
