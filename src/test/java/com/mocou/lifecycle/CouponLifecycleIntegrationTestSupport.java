@@ -4,10 +4,10 @@ import com.mocou.support.MySqlContainerTest;
 import org.junit.jupiter.api.BeforeEach;
 
 /**
- * 쿠폰 생명주기 통합 테스트가 공유하는 데이터 정리와 픽스처.
+ * 쿠폰 생명주기 통합 테스트만 필요로 하는 픽스처와 정리.
  *
- * <p>쿠폰 계열 테이블 전체를 비우고, 실패 상황 재현용 트리거를 걷어낸다. 발급된 쿠폰 한 건을 만드는 픽스처도 여기서 제공한다. 다른 도메인
- * 테스트에는 필요 없는 동작이라 공통 기반이 아니라 이 패키지에 둔다.
+ * <p>발급된 쿠폰 한 건을 만드는 픽스처와, 저장 실패를 재현하려고 만든 트리거를 걷어내는 처리를 담는다. 다른 도메인 테스트에는 필요 없어서 공통
+ * 기반이 아니라 이 패키지에 둔다. 테이블 정리는 FK로 엮여 있어 도메인별로 나눌 수 없으므로 공통 기반이 담당한다.
  */
 abstract class CouponLifecycleIntegrationTestSupport extends MySqlContainerTest {
 
@@ -15,13 +15,8 @@ abstract class CouponLifecycleIntegrationTestSupport extends MySqlContainerTest 
     private static final long FIXTURE_COUPON_ID = 2001L;
 
     @BeforeEach
-    void resetCouponData() {
+    void removeUseFailureTrigger() {
         jdbcTemplate.execute("DROP TRIGGER IF EXISTS fail_used_history");
-        jdbcTemplate.update("DELETE FROM coupon_issue_history");
-        jdbcTemplate.update("DELETE FROM coupon_issue");
-        jdbcTemplate.update("DELETE FROM coupon_stock");
-        jdbcTemplate.update("DELETE FROM coupon");
-        jdbcTemplate.update("DELETE FROM member");
     }
 
     protected void insertIssuedCoupon(long issueId) {
