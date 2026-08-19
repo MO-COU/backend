@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.mocou.support.MySqlContainerTest;
 import java.time.LocalDateTime;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
@@ -31,6 +32,7 @@ class CouponExpirationBatchTest extends MySqlContainerTest {
     private Job couponExpirationJob;
 
     @Test
+    @DisplayName("고정 만료 기준 시각으로 만료 배치를 실행한다")
     void runsCouponExpirationJobWithFixedCutoffAt() throws Exception {
         insertIssuedCoupon(ISSUE_ID);
         jdbcTemplate.update(
