@@ -22,6 +22,9 @@ public class RedisCouponIssueGateway {
     private static final long SOLD_OUT = 0L;
     private static final long DUPLICATE_ISSUE = -1L;
     private static final long STOCK_NOT_INITIALIZED = -2L;
+    private static final long NOT_OPEN_YET = -3L;
+    private static final long ISSUE_CLOSED = -4L;
+    private static final long METADATA_NOT_INITIALIZED = -5L;
 
     private static final long COMPENSATION_APPLIED = 1L;
     private static final long COMPENSATION_NOT_NEEDED = 0L;
@@ -67,7 +70,8 @@ public class RedisCouponIssueGateway {
         Long result = redisTemplate.execute(
                 COMPENSATE_SCRIPT,
                 createCouponKeys(couponId),
-                Long.toString(memberId));
+                Long.toString(memberId)
+                );
 
         if (result == null) {
             throw new IllegalStateException("Redis compensation script returned null.");
@@ -79,7 +83,9 @@ public class RedisCouponIssueGateway {
     private List<String> createCouponKeys(long couponId) {
         return List.of(
                 CouponRedisKey.stock(couponId),
-                CouponRedisKey.issuedMembers(couponId));
+                CouponRedisKey.issuedMembers(couponId),
+                CouponRedisKey.metadata(couponId)
+               );
     }
 
     private CouponReservationResult toReservationResult(long result) {
@@ -97,6 +103,18 @@ public class RedisCouponIssueGateway {
 
         if (result == STOCK_NOT_INITIALIZED) {
             return CouponReservationResult.STOCK_NOT_INITIALIZED;
+        }
+
+        if (result == NOT_OPEN_YET) {
+            return CouponReservationResult.NOT_OPEN_YET;
+        }
+
+        if (result == ISSUE_CLOSED) {
+            return CouponReservationResult.ISSUE_CLOSED;
+        }
+
+        if (result == METADATA_NOT_INITIALIZED) {
+            return CouponReservationResult.METADATA_NOT_INITIALIZED;
         }
 
         throw new IllegalStateException("Unexpected Redis reservation result: " + result);
