@@ -90,7 +90,7 @@ class GlobalExceptionHandlerTest {
                 .willThrow(new CouponUseException(CouponUseErrorCode.INVALID_INPUT));
 
         // when & then
-        mockMvc.perform(post("/api/v1/coupon-issues/{issueId}/use", 42L))
+        mockMvc.perform(post("/api/coupon-issues/{issueId}/use", 42L))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
     }

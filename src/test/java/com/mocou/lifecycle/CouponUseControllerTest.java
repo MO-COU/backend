@@ -49,7 +49,7 @@ class CouponUseControllerTest {
 
         // when, then
         mockMvc.perform(
-                        post("/api/v1/coupon-issues/{issueId}/use", ISSUE_ID)
+                        post("/api/coupon-issues/{issueId}/use", ISSUE_ID)
                                 .header("Idempotency-Key", "use-request-1"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
@@ -66,7 +66,7 @@ class CouponUseControllerTest {
                 .willThrow(new CouponUseException(CouponUseErrorCode.INVALID_INPUT));
 
         // when, then
-        mockMvc.perform(post("/api/v1/coupon-issues/{issueId}/use", ISSUE_ID))
+        mockMvc.perform(post("/api/coupon-issues/{issueId}/use", ISSUE_ID))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
     }
@@ -81,7 +81,7 @@ class CouponUseControllerTest {
 
         // when, then
         mockMvc.perform(
-                        post("/api/v1/coupon-issues/{issueId}/use", ISSUE_ID)
+                        post("/api/coupon-issues/{issueId}/use", ISSUE_ID)
                                 .header("Idempotency-Key", "error-request"))
                 .andExpect(status().is(expectedStatus))
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
