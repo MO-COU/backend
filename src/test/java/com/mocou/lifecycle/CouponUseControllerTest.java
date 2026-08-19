@@ -6,6 +6,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
+import com.mocou.global.exception.GlobalExceptionHandler;
 import java.time.LocalDateTime;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,7 +38,7 @@ class CouponUseControllerTest {
     void setUp() {
         mockMvc =
                 MockMvcBuilders.standaloneSetup(controller)
-                        .setControllerAdvice(new CouponUseExceptionHandler())
+                        .setControllerAdvice(new GlobalExceptionHandler())
                         .build();
     }
 
@@ -53,9 +56,11 @@ class CouponUseControllerTest {
                                 .header("Idempotency-Key", "use-request-1"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.couponIssueId").value(ISSUE_ID))
-                .andExpect(jsonPath("$.status").value("USED"))
-                .andExpect(jsonPath("$.usedAt").value("2026-08-18T15:30:00"));
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.couponIssueId").value(ISSUE_ID))
+                .andExpect(jsonPath("$.data.status").value("USED"))
+                .andExpect(jsonPath("$.data.usedAt").value("2026-08-18T15:30:00"))
+                .andExpect(jsonPath("$.timestamp").isNotEmpty());
     }
 
     @Test
@@ -63,21 +68,23 @@ class CouponUseControllerTest {
     void mapsMissingIdempotencyKeyToInvalidInput() throws Exception {
         // given
         given(service.use(ISSUE_ID, null))
-                .willThrow(new CouponUseException(CouponUseErrorCode.INVALID_INPUT));
+                .willThrow(new BusinessException(ErrorCode.INVALID_INPUT));
 
         // when, then
         mockMvc.perform(post("/api/coupon-issues/{issueId}/use", ISSUE_ID))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("INVALID_INPUT"))
+                .andExpect(jsonPath("$.timestamp").isNotEmpty());
     }
 
     @ParameterizedTest
     @MethodSource("errorCases")
     @DisplayName("쿠폰 사용 도메인 오류를 HTTP 상태로 변환한다")
-    void mapsCouponUseErrors(CouponUseErrorCode errorCode, int expectedStatus) throws Exception {
+    void mapsCouponUseErrors(ErrorCode errorCode, int expectedStatus) throws Exception {
         // given
         given(service.use(ISSUE_ID, "error-request"))
-                .willThrow(new CouponUseException(errorCode));
+                .willThrow(new BusinessException(errorCode));
 
         // when, then
         mockMvc.perform(
@@ -85,16 +92,18 @@ class CouponUseControllerTest {
                                 .header("Idempotency-Key", "error-request"))
                 .andExpect(status().is(expectedStatus))
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.code").value(errorCode.name()))
-                .andExpect(jsonPath("$.message").value(errorCode.message()));
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value(errorCode.name()))
+                .andExpect(jsonPath("$.error.message").value(errorCode.getMessage()))
+                .andExpect(jsonPath("$.timestamp").isNotEmpty());
     }
 
     private static Stream<Arguments> errorCases() {
         return Stream.of(
-                Arguments.of(CouponUseErrorCode.INVALID_INPUT, 400),
-                Arguments.of(CouponUseErrorCode.ISSUE_NOT_FOUND, 404),
-                Arguments.of(CouponUseErrorCode.IDEMPOTENCY_CONFLICT, 409),
-                Arguments.of(CouponUseErrorCode.INVALID_STATE_TRANSITION, 409),
-                Arguments.of(CouponUseErrorCode.COUPON_EXPIRED, 410));
+                Arguments.of(ErrorCode.INVALID_INPUT, 400),
+                Arguments.of(ErrorCode.ISSUE_NOT_FOUND, 404),
+                Arguments.of(ErrorCode.IDEMPOTENCY_CONFLICT, 409),
+                Arguments.of(ErrorCode.INVALID_STATE_TRANSITION, 409),
+                Arguments.of(ErrorCode.COUPON_EXPIRED, 410));
     }
 }

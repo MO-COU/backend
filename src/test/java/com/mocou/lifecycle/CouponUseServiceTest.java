@@ -6,6 +6,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.BDDMockito.given;
 
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -79,7 +81,7 @@ class CouponUseServiceTest {
                 .willReturn(Optional.of(CouponIssueStatus.EXPIRED));
 
         // when, then
-        assertError(CouponUseErrorCode.IDEMPOTENCY_CONFLICT);
+        assertError(ErrorCode.IDEMPOTENCY_CONFLICT);
 
         verify(repository, never()).markUsed(ISSUE_ID);
     }
@@ -94,7 +96,7 @@ class CouponUseServiceTest {
         given(repository.findIssue(ISSUE_ID)).willReturn(Optional.empty());
 
         // when, then
-        assertError(CouponUseErrorCode.ISSUE_NOT_FOUND);
+        assertError(ErrorCode.ISSUE_NOT_FOUND);
     }
 
     @Test
@@ -111,7 +113,7 @@ class CouponUseServiceTest {
                                         ISSUE_ID, CouponIssueStatus.ISSUED, null, true)));
 
         // when, then
-        assertError(CouponUseErrorCode.COUPON_EXPIRED);
+        assertError(ErrorCode.COUPON_EXPIRED);
     }
 
     @Test
@@ -128,7 +130,7 @@ class CouponUseServiceTest {
                                         ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
 
         // when, then
-        assertError(CouponUseErrorCode.INVALID_STATE_TRANSITION);
+        assertError(ErrorCode.INVALID_STATE_TRANSITION);
     }
 
     @Test
@@ -145,7 +147,7 @@ class CouponUseServiceTest {
                                         ISSUE_ID, CouponIssueStatus.EXPIRED, null, true)));
 
         // when, then
-        assertError(CouponUseErrorCode.COUPON_EXPIRED);
+        assertError(ErrorCode.COUPON_EXPIRED);
     }
 
     @Test
@@ -175,8 +177,8 @@ class CouponUseServiceTest {
         // when, then
         assertThatThrownBy(() -> service.use(0, IDEMPOTENCY_KEY))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
-                        error -> assertThat(error.errorCode()).isEqualTo(CouponUseErrorCode.INVALID_INPUT));
+                        BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
     }
 
     @ParameterizedTest
@@ -187,14 +189,14 @@ class CouponUseServiceTest {
         // when, then
         assertThatThrownBy(() -> service.use(ISSUE_ID, key))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
-                        error -> assertThat(error.errorCode()).isEqualTo(CouponUseErrorCode.INVALID_INPUT));
+                        BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
     }
 
-    private void assertError(CouponUseErrorCode expected) {
+    private void assertError(ErrorCode expected) {
         assertThatThrownBy(() -> service.use(ISSUE_ID, IDEMPOTENCY_KEY))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
-                        error -> assertThat(error.errorCode()).isEqualTo(expected));
+                        BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(expected));
     }
 }

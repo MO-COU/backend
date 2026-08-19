@@ -20,6 +20,10 @@ public enum ErrorCode {
     SOLD_OUT(HttpStatus.CONFLICT, "재고가 소진되었습니다"),
     DUPLICATE(HttpStatus.CONFLICT, "이미 발급받은 쿠폰입니다"),
     NOT_OPEN_YET(HttpStatus.CONFLICT, "아직 발급 시작 전입니다"),
+    ISSUE_NOT_FOUND(HttpStatus.NOT_FOUND, "발급된 쿠폰을 찾을 수 없습니다."),
+    IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "멱등성 키가 다른 상태 전이에 사용되었습니다."),
+    INVALID_STATE_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서는 쿠폰을 사용할 수 없습니다."),
+    COUPON_EXPIRED(HttpStatus.GONE, "만료된 쿠폰은 사용할 수 없습니다."),
 
     // 회원
     NOT_MEMBER(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다"),
