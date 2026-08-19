@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.mocou.support.MySqlContainerTest;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +24,7 @@ class CouponExpirationIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("만료 대상은 한 번만 만료 처리되고 이력이 기록된다")
     void expiresDueIssueAndRecordsHistoryOnlyOnce() {
         insertIssuedCoupon(ISSUE_ID);
         LocalDateTime expiresAt = LocalDateTime.of(2026, 8, 18, 17, 0);
@@ -44,6 +46,7 @@ class CouponExpirationIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("만료 기준 시각 이후의 쿠폰은 발급 상태로 유지된다")
     void leavesIssueWithExpiryAfterCutoffIssued() {
         insertIssuedCoupon(ISSUE_ID);
         jdbcTemplate.update(
@@ -58,6 +61,7 @@ class CouponExpirationIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("만료 이력 저장에 실패하면 상태 변경을 롤백한다")
     void rollsBackStatusWhenExpiredHistoryInsertFails() {
         insertIssuedCoupon(ISSUE_ID);
         jdbcTemplate.update(

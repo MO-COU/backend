@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +24,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     @Autowired private CouponUseService service;
 
     @Test
+    @DisplayName("쿠폰 사용 상태와 이력을 MySQL에 저장한다")
     void storesUsedStateAndHistoryInMySql() {
         insertIssuedCoupon(ISSUE_ID);
 
@@ -48,6 +50,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("DB 기준으로 만료된 쿠폰 사용을 거부한다")
     void rejectsExpiredCouponUsingDatabaseTime() {
         insertIssuedCoupon(ISSUE_ID);
         jdbcTemplate.update(
@@ -67,6 +70,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("발급 쿠폰이 없으면 오류를 반환한다")
     void rejectsMissingIssue() {
         assertThatThrownBy(() -> service.use(9999L, "missing-request"))
                 .isInstanceOfSatisfying(
@@ -77,6 +81,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("이미 사용된 쿠폰은 다른 키로 사용할 수 없다")
     void rejectsAlreadyUsedCouponWithAnotherKey() {
         insertIssuedCoupon(ISSUE_ID);
         jdbcTemplate.update(
@@ -95,6 +100,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("저장된 만료 상태는 만료 쿠폰 오류로 반환한다")
     void rejectsPersistedExpiredCouponAsExpiredCoupon() {
         insertIssuedCoupon(ISSUE_ID);
         jdbcTemplate.update(
@@ -112,6 +118,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("대소문자가 다른 키로는 성공 결과를 재사용하지 않는다")
     void doesNotReplaySuccessForCaseDifferentKey() {
         insertIssuedCoupon(ISSUE_ID);
         service.use(ISSUE_ID, "Case-Sensitive-Key");
@@ -127,6 +134,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("DB 정렬 규칙 충돌은 멱등성 충돌로 반환한다")
     void mapsCollationEquivalentHistoryKeyCollisionToConflict() {
         insertIssuedCoupon(ISSUE_ID);
 
@@ -143,6 +151,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("사용 이력 저장 실패 시 상태 변경을 롤백한다")
     void rollsBackStateWhenHistoryInsertFails() {
         insertIssuedCoupon(ISSUE_ID);
         jdbcTemplate.execute(
@@ -157,6 +166,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("같은 키의 동시 사용 요청은 같은 성공 결과를 반환한다")
     void returnsSameSuccessForConcurrentRequestsWithSameKey() throws Exception {
         insertIssuedCoupon(ISSUE_ID);
 
@@ -172,6 +182,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("서로 다른 키의 동시 요청 중 하나만 사용 처리된다")
     void allowsOnlyOneConcurrentRequestWithDifferentKeys() throws Exception {
         insertIssuedCoupon(ISSUE_ID);
 

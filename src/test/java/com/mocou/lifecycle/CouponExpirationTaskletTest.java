@@ -3,10 +3,11 @@ package com.mocou.lifecycle;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.BDDMockito.given;
 
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -37,42 +38,53 @@ class CouponExpirationTaskletTest {
     }
 
     private void givenCutoffAt() {
-        when(chunkContext.getStepContext()).thenReturn(stepContext);
-        when(stepContext.getStepExecution()).thenReturn(stepExecution);
-        when(stepExecution.getJobParameters())
-                .thenReturn(
+        given(chunkContext.getStepContext()).willReturn(stepContext);
+        given(stepContext.getStepExecution()).willReturn(stepExecution);
+        given(stepExecution.getJobParameters())
+                .willReturn(
                         new JobParametersBuilder()
                                 .addLocalDateTime("cutoffAt", CUTOFF_AT)
                                 .toJobParameters());
     }
 
     @Test
+    @DisplayName("전체 청크가 선택되면 다음 청크를 계속 처리한다")
     void continuesWhenAFullChunkWasSelected() throws Exception {
+        // given
         givenCutoffAt();
-        when(service.expireDueIssues(CUTOFF_AT, 1000)).thenReturn(1000);
+        given(service.expireDueIssues(CUTOFF_AT, 1000)).willReturn(1000);
 
+        // when
         RepeatStatus status = tasklet.execute(null, chunkContext);
 
+        // then
         assertThat(status).isEqualTo(RepeatStatus.CONTINUABLE);
         verify(service).expireDueIssues(CUTOFF_AT, 1000);
     }
 
     @Test
+    @DisplayName("전체 청크보다 적게 선택되면 처리를 종료한다")
     void finishesWhenLessThanAFullChunkWasSelected() throws Exception {
+        // given
         givenCutoffAt();
-        when(service.expireDueIssues(CUTOFF_AT, 1000)).thenReturn(3);
+        given(service.expireDueIssues(CUTOFF_AT, 1000)).willReturn(3);
 
+        // when
         RepeatStatus status = tasklet.execute(null, chunkContext);
 
+        // then
         assertThat(status).isEqualTo(RepeatStatus.FINISHED);
     }
 
     @Test
+    @DisplayName("청크 크기가 0 이하이면 작업을 시작하지 않는다")
     void rejectsNonPositiveChunkSizeBeforeStartingWork() {
+        // given
         CouponExpirationBatchProperties properties = new CouponExpirationBatchProperties();
         properties.setChunkSize(0);
         CouponExpirationTasklet invalidTasklet = new CouponExpirationTasklet(service, properties);
 
+        // when, then
         assertThatThrownBy(() -> invalidTasklet.execute(null, chunkContext))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("chunkSize must be positive");
