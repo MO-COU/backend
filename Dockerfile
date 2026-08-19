@@ -17,4 +17,5 @@ WORKDIR /app
 COPY --from=build /workspace/build/libs/*.jar app.jar
 
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# 베이스 이미지 기본 타임존(UTC)을 그대로 두면 MySQL(TZ=Asia/Seoul)과 9시간 어긋난다.
+ENTRYPOINT ["java", "-Duser.timezone=Asia/Seoul", "-jar", "app.jar"]
