@@ -5,6 +5,7 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,14 @@ class DatagenIntegrationTest extends MySqlContainerTest {
     @Autowired private CouponSeeder couponSeeder;
     @Autowired private MemberGenerator memberGenerator;
     @Autowired private DatagenProperties properties;
+
+    /** 생성 대상 테이블만 비운다. 자식 테이블인 {@code coupon_stock}을 먼저 지워야 FK 제약에 걸리지 않는다. */
+    @BeforeEach
+    void resetGeneratedData() {
+        jdbcTemplate.update("DELETE FROM coupon_stock");
+        jdbcTemplate.update("DELETE FROM coupon");
+        jdbcTemplate.update("DELETE FROM member");
+    }
 
     @Test
     @DisplayName("더미 쿠폰과 시연 쿠폰을 재고와 함께 생성한다")
