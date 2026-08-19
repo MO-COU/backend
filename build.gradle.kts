@@ -78,6 +78,8 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// 프로젝트 표준 타임존. CI 러너는 UTC라서 고정하지 않으면 시각 비교 테스트가 로컬과 다르게 동작한다.
+	systemProperty("user.timezone", "Asia/Seoul")
 }
 
 sourceSets {
