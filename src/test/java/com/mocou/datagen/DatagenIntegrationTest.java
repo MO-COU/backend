@@ -25,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DatagenIntegrationTest extends MySqlContainerTest {
 
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 8, 19, 0, 0);
+    /** 회원 가입일의 상한. 실제로는 첫 회차 오픈 시각을 넘긴다. */
+    private static final LocalDateTime SIGNUP_UNTIL = BASE_TIME.minusYears(6);
 
     @Autowired private CouponSeeder couponSeeder;
     @Autowired private MemberGenerator memberGenerator;
@@ -124,7 +126,7 @@ class DatagenIntegrationTest extends MySqlContainerTest {
         long expectedCount = properties.memberCount();
 
         // when
-        memberGenerator.generate(BASE_TIME);
+        memberGenerator.generate(SIGNUP_UNTIL);
 
         // then
         assertThat(memberCount()).isEqualTo(expectedCount);
@@ -136,11 +138,26 @@ class DatagenIntegrationTest extends MySqlContainerTest {
                 .isEqualTo(expectedCount);
     }
 
+    /** 가입도 하지 않은 회원이 5년 전에 쿠폰을 받은 것으로 기록되면 안 된다. */
+    @Test
+    @DisplayName("모든 회원이 첫 회차보다 먼저 가입한다")
+    void everyMemberSignsUpBeforeTheFirstRound() {
+        // given
+        LocalDateTime firstRoundOpenAt = couponSeeder.specs(BASE_TIME).get(0).openAt();
+
+        // when
+        memberGenerator.generate(firstRoundOpenAt);
+
+        // then
+        assertThat(countMembersWhere("created_at >= ?", firstRoundOpenAt)).isZero();
+        assertThat(countMembersWhere("created_at < ?", firstRoundOpenAt.minusYears(1))).isZero();
+    }
+
     @Test
     @DisplayName("마스킹 대상 필드가 정해진 형식을 벗어나지 않는다")
     void maskableFieldsFollowFixedFormat() {
         // given, when
-        memberGenerator.generate(BASE_TIME);
+        memberGenerator.generate(SIGNUP_UNTIL);
 
         // then
         assertThat(countMembersWhere("phone NOT REGEXP '^010-[0-9]{4}-[0-9]{4}$'")).isZero();
@@ -152,12 +169,12 @@ class DatagenIntegrationTest extends MySqlContainerTest {
     @DisplayName("같은 기준 시각으로 다시 생성하면 회원 데이터가 완전히 같다")
     void regeneratingWithSameBaseTimeProducesIdenticalMembers() {
         // given
-        memberGenerator.generate(BASE_TIME);
+        memberGenerator.generate(SIGNUP_UNTIL);
         String firstRun = memberFingerprint();
 
         // when
         jdbcTemplate.update("DELETE FROM member");
-        memberGenerator.generate(BASE_TIME);
+        memberGenerator.generate(SIGNUP_UNTIL);
 
         // then
         assertThat(memberFingerprint()).isEqualTo(firstRun);
@@ -182,7 +199,7 @@ class DatagenIntegrationTest extends MySqlContainerTest {
                 Timestamp.valueOf(BASE_TIME));
 
         // when
-        assertThatThrownBy(() -> memberGenerator.generate(BASE_TIME))
+        assertThatThrownBy(() -> memberGenerator.generate(SIGNUP_UNTIL))
                 .isInstanceOf(DataAccessException.class);
 
         // then
@@ -205,8 +222,9 @@ class DatagenIntegrationTest extends MySqlContainerTest {
                 "SELECT " + column + " FROM coupon WHERE coupon_id = ?", LocalDateTime.class, couponId);
     }
 
-    private long countMembersWhere(String condition) {
-        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM member WHERE " + condition, Long.class);
+    private long countMembersWhere(String condition, Object... args) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM member WHERE " + condition, Long.class, args);
     }
 
     private long couponCount() {
