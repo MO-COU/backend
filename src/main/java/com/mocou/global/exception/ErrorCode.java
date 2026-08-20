@@ -1,8 +1,9 @@
 package com.mocou.global.exception;
 
+import org.springframework.http.HttpStatus;
+
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 
 /**
  * 기능 명세서의 실패 코드를 한 곳에 모은 enum.
@@ -24,6 +25,8 @@ public enum ErrorCode {
     IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "멱등성 키가 다른 상태 전이에 사용되었습니다."),
     INVALID_STATE_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서는 쿠폰을 사용할 수 없습니다."),
     COUPON_EXPIRED(HttpStatus.GONE, "만료된 쿠폰은 사용할 수 없습니다."),
+    COUPON_ISSUE_NOT_READY(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 준비가 완료되지 않았습니다"),
+    ISSUE_CLOSED(HttpStatus.GONE, "쿠폰 발급이 종료되었습니다"),
 
     // 회원
     NOT_MEMBER(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다"),
