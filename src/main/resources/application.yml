@@ -21,4 +21,4 @@ mocou:
   lifecycle:
     expiration:
       fixed-delay-ms: 60000
-      chunk-size: 5000
+      chunk-size: 2000

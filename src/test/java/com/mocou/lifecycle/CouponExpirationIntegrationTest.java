@@ -3,6 +3,7 @@ package com.mocou.lifecycle;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.mocou.global.exception.BusinessException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -154,7 +155,7 @@ class CouponExpirationIntegrationTest extends CouponLifecycleIntegrationTestSupp
                                 start.await();
                                 try {
                                     couponUseService.use(ISSUE_ID, "use-expiration-race");
-                                } catch (CouponUseException ignored) {
+                                } catch (BusinessException ignored) {
                                     // 경쟁에서 진 요청은 전이 실패가 정상이다.
                                 }
                                 return null;

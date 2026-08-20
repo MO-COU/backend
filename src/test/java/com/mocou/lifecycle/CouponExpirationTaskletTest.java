@@ -48,13 +48,13 @@ class CouponExpirationTaskletTest {
     }
 
     @Test
-    @DisplayName("만료 배치의 기본 청크 크기는 5,000건이다")
-    void usesFiveThousandAsDefaultChunkSize() {
+    @DisplayName("만료 배치의 기본 청크 크기는 2,000건이다")
+    void usesTwoThousandAsDefaultChunkSize() {
         // when
         CouponExpirationBatchProperties properties = new CouponExpirationBatchProperties();
 
         // then
-        assertThat(properties.getChunkSize()).isEqualTo(5000);
+        assertThat(properties.getChunkSize()).isEqualTo(2000);
     }
 
     @Test
