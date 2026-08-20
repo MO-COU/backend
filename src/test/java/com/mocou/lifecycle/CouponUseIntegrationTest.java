@@ -3,7 +3,8 @@ package com.mocou.lifecycle;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.mocou.support.MySqlContainerTest;
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -17,7 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = "spring.batch.jdbc.initialize-schema=never")
-class CouponUseIntegrationTest extends MySqlContainerTest {
+class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
 
     private static final long ISSUE_ID = 3001L;
 
@@ -60,10 +61,9 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
 
         assertThatThrownBy(() -> service.use(ISSUE_ID, "expired-request"))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
+                        BusinessException.class,
                         error ->
-                                assertThat(error.errorCode())
-                                        .isEqualTo(CouponUseErrorCode.COUPON_EXPIRED));
+                                assertThat(error.getErrorCode()).isEqualTo(ErrorCode.COUPON_EXPIRED));
 
         assertThat(statusOf(ISSUE_ID)).isEqualTo("ISSUED");
         assertThat(usedHistoryCount(ISSUE_ID)).isZero();
@@ -74,10 +74,9 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     void rejectsMissingIssue() {
         assertThatThrownBy(() -> service.use(9999L, "missing-request"))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
+                        BusinessException.class,
                         error ->
-                                assertThat(error.errorCode())
-                                        .isEqualTo(CouponUseErrorCode.ISSUE_NOT_FOUND));
+                                assertThat(error.getErrorCode()).isEqualTo(ErrorCode.ISSUE_NOT_FOUND));
     }
 
     @Test
@@ -91,10 +90,10 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
 
         assertThatThrownBy(() -> service.use(ISSUE_ID, "another-request"))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
+                        BusinessException.class,
                         error ->
-                                assertThat(error.errorCode())
-                                        .isEqualTo(CouponUseErrorCode.INVALID_STATE_TRANSITION));
+                                assertThat(error.getErrorCode())
+                                        .isEqualTo(ErrorCode.INVALID_STATE_TRANSITION));
 
         assertThat(usedHistoryCount(ISSUE_ID)).isZero();
     }
@@ -111,10 +110,9 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
 
         assertThatThrownBy(() -> service.use(ISSUE_ID, "expired-state-request"))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
+                        BusinessException.class,
                         error ->
-                                assertThat(error.errorCode())
-                                        .isEqualTo(CouponUseErrorCode.COUPON_EXPIRED));
+                                assertThat(error.getErrorCode()).isEqualTo(ErrorCode.COUPON_EXPIRED));
     }
 
     @Test
@@ -125,11 +123,10 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
 
         assertThatThrownBy(() -> service.use(ISSUE_ID, "case-sensitive-key"))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
+                        BusinessException.class,
                         error ->
-                                assertThat(error.errorCode())
-                                        .isEqualTo(
-                                                CouponUseErrorCode.INVALID_STATE_TRANSITION));
+                                assertThat(error.getErrorCode())
+                                        .isEqualTo(ErrorCode.INVALID_STATE_TRANSITION));
         assertThat(usedHistoryCount(ISSUE_ID)).isEqualTo(1);
     }
 
@@ -140,11 +137,10 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
 
         assertThatThrownBy(() -> service.use(ISSUE_ID, "issue:" + ISSUE_ID))
                 .isInstanceOfSatisfying(
-                        CouponUseException.class,
+                        BusinessException.class,
                         error ->
-                                assertThat(error.errorCode())
-                                        .isEqualTo(
-                                                CouponUseErrorCode.IDEMPOTENCY_CONFLICT));
+                                assertThat(error.getErrorCode())
+                                        .isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
 
         assertThat(statusOf(ISSUE_ID)).isEqualTo("ISSUED");
         assertThat(usedHistoryCount(ISSUE_ID)).isZero();
@@ -196,7 +192,7 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
                 .filteredOn(
                         attempt ->
                                 attempt.errorCode()
-                                        == CouponUseErrorCode.INVALID_STATE_TRANSITION)
+                                        == ErrorCode.INVALID_STATE_TRANSITION)
                 .hasSize(1);
         assertThat(usedHistoryCount(ISSUE_ID)).isEqualTo(1);
     }
@@ -253,10 +249,10 @@ class CouponUseIntegrationTest extends MySqlContainerTest {
     private Attempt attemptUse(String idempotencyKey) {
         try {
             return new Attempt(service.use(ISSUE_ID, idempotencyKey), null);
-        } catch (CouponUseException exception) {
-            return new Attempt(null, exception.errorCode());
+        } catch (BusinessException exception) {
+            return new Attempt(null, exception.getErrorCode());
         }
     }
 
-    private record Attempt(CouponUseResult result, CouponUseErrorCode errorCode) {}
+    private record Attempt(CouponUseResult result, ErrorCode errorCode) {}
 }
