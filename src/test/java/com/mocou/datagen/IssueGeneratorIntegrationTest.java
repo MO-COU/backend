@@ -82,7 +82,7 @@ class IssueGeneratorIntegrationTest extends MySqlContainerTest {
                                 "SELECT COUNT(*) FROM coupon_issue i WHERE NOT EXISTS ("
                                         + "SELECT 1 FROM coupon_issue_history h "
                                         + "WHERE h.coupon_issue_id = i.coupon_issue_id "
-                                        + "AND h.from_status IS NULL AND h.to_status = 'ISSUED')",
+                                        + "AND h.from_status = 'UNISSUED' AND h.to_status = 'ISSUED')",
                                 Long.class))
                 .isZero();
 
@@ -189,7 +189,7 @@ class IssueGeneratorIntegrationTest extends MySqlContainerTest {
                         + "coupon_id, member_id, status, issued_at, IFNULL(used_at, ''), expires_at)))) "
                         + "FROM coupon_issue), '/', "
                         + "(SELECT CONCAT(COUNT(*), ':', SUM(CRC32(CONCAT_WS('|', coupon_issue_id, "
-                        + "IFNULL(from_status, ''), to_status, changed_at, idempotency_key)))) "
+                        + "from_status, to_status, changed_at, idempotency_key)))) "
                         + "FROM coupon_issue_history))",
                 String.class);
     }

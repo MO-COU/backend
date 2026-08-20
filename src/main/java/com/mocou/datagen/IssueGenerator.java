@@ -93,7 +93,7 @@ class IssueGenerator {
     /**
      * 발급 한 건이 상태에 따라 이력 1~2행이 된다.
      *
-     * <p>행이 없다가 생기는 것도 한 번의 상태 변화라서 최초 이력은 {@code from_status}가 {@code NULL}이다. 최종 상태에
+     * <p>행이 없다가 생기는 것도 한 번의 상태 변화라서 최초 이력은 {@code UNISSUED -> ISSUED}로 남긴다. 최종 상태에
      * 도달한 건은 그 전이가 일어난 시각으로 이력을 하나 더 남긴다.
      */
     private List<Object[]> historyRows(List<IssueAllocation> allocations) {
@@ -103,7 +103,7 @@ class IssueGenerator {
             rows.add(
                     new Object[] {
                         issueId,
-                        null,
+                        CouponIssueStatus.UNISSUED.name(),
                         CouponIssueStatus.ISSUED.name(),
                         Timestamp.valueOf(allocation.issuedAt()),
                         "ISSUE:" + issueId
