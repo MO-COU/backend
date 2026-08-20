@@ -1,5 +1,7 @@
 package com.mocou.lifecycle;
 
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
 import java.util.Optional;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -31,7 +33,7 @@ public class CouponUseService {
             try {
                 repository.saveUsedHistory(issueId, idempotencyKey);
             } catch (DuplicateKeyException exception) {
-                throw new CouponUseException(CouponUseErrorCode.IDEMPOTENCY_CONFLICT);
+                throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
             }
             return usedResult(issueId);
         }
@@ -45,17 +47,17 @@ public class CouponUseService {
         CouponIssueState issue =
                 repository
                         .findIssue(issueId)
-                        .orElseThrow(() -> new CouponUseException(CouponUseErrorCode.ISSUE_NOT_FOUND));
+                        .orElseThrow(() -> new BusinessException(ErrorCode.ISSUE_NOT_FOUND));
         if (issue.status() == CouponIssueStatus.EXPIRED
                 || (issue.status() == CouponIssueStatus.ISSUED && issue.expired())) {
-            throw new CouponUseException(CouponUseErrorCode.COUPON_EXPIRED);
+            throw new BusinessException(ErrorCode.COUPON_EXPIRED);
         }
-        throw new CouponUseException(CouponUseErrorCode.INVALID_STATE_TRANSITION);
+        throw new BusinessException(ErrorCode.INVALID_STATE_TRANSITION);
     }
 
     private CouponUseResult resolvePriorTransition(long issueId, CouponIssueStatus targetStatus) {
         if (targetStatus != CouponIssueStatus.USED) {
-            throw new CouponUseException(CouponUseErrorCode.IDEMPOTENCY_CONFLICT);
+            throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
         }
         return usedResult(issueId);
     }
@@ -64,9 +66,9 @@ public class CouponUseService {
         CouponIssueState issue =
                 repository
                         .findIssue(issueId)
-                        .orElseThrow(() -> new CouponUseException(CouponUseErrorCode.ISSUE_NOT_FOUND));
+                        .orElseThrow(() -> new BusinessException(ErrorCode.ISSUE_NOT_FOUND));
         if (issue.status() != CouponIssueStatus.USED || issue.usedAt() == null) {
-            throw new CouponUseException(CouponUseErrorCode.INVALID_STATE_TRANSITION);
+            throw new BusinessException(ErrorCode.INVALID_STATE_TRANSITION);
         }
         return new CouponUseResult(issue.couponIssueId(), issue.status(), issue.usedAt());
     }
@@ -76,7 +78,7 @@ public class CouponUseService {
                 || idempotencyKey == null
                 || idempotencyKey.isBlank()
                 || idempotencyKey.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
-            throw new CouponUseException(CouponUseErrorCode.INVALID_INPUT);
+            throw new BusinessException(ErrorCode.INVALID_INPUT);
         }
     }
 }

@@ -59,7 +59,7 @@ B2는 발급 이후 `ISSUED → USED`, `ISSUED → EXPIRED` 전이와 이력을 
 ## 쿠폰 사용 API와 멱등성
 
 ```http
-POST /api/v1/coupon-issues/{issueId}/use
+POST /api/coupon-issues/{issueId}/use
 Idempotency-Key: <클라이언트 생성 키>
 ```
 
