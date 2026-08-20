@@ -44,7 +44,7 @@ abstract class CouponLifecycleIntegrationTestSupport extends MySqlContainerTest 
         jdbcTemplate.update(
                 "INSERT INTO coupon_issue_history "
                         + "(coupon_issue_id, from_status, to_status, changed_at, idempotency_key) "
-                        + "VALUES (?, NULL, 'ISSUED', CURRENT_TIMESTAMP - INTERVAL 1 DAY, ?)",
+                        + "VALUES (?, 'UNISSUED', 'ISSUED', CURRENT_TIMESTAMP - INTERVAL 1 DAY, ?)",
                 issueId,
                 "ISSUE:" + issueId);
     }
