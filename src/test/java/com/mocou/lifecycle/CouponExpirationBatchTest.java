@@ -2,7 +2,6 @@ package com.mocou.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.mocou.support.MySqlContainerTest;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,7 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
             "spring.batch.jdbc.initialize-schema=always",
             "mocou.lifecycle.expiration.fixed-delay-ms=3600000"
         })
-class CouponExpirationBatchTest extends MySqlContainerTest {
+class CouponExpirationBatchTest extends CouponLifecycleIntegrationTestSupport {
 
     private static final long ISSUE_ID = 3001L;
 

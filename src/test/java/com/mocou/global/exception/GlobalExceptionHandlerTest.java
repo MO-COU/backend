@@ -8,9 +8,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.mocou.global.logging.TraceIdFilter;
 import com.mocou.lifecycle.CouponUseController;
-import com.mocou.lifecycle.CouponUseErrorCode;
-import com.mocou.lifecycle.CouponUseException;
-import com.mocou.lifecycle.CouponUseExceptionHandler;
 import com.mocou.lifecycle.CouponUseService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -40,8 +37,7 @@ class GlobalExceptionHandlerTest {
     void setUp() {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new TestController(), new CouponUseController(couponUseService))
-                .setControllerAdvice(
-                        new GlobalExceptionHandler(), new CouponUseExceptionHandler())
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .addFilters(new TraceIdFilter())
                 .build();
     }
@@ -83,16 +79,17 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("기존 CouponUseException은 B팀 전용 Handler가 계속 처리한다")
-    void keepsExistingCouponUseExceptionHandler() throws Exception {
+    @DisplayName("쿠폰 사용 BusinessException을 공통 응답으로 변환한다")
+    void handlesCouponUseBusinessException() throws Exception {
         // given
         given(couponUseService.use(42L, null))
-                .willThrow(new CouponUseException(CouponUseErrorCode.INVALID_INPUT));
+                .willThrow(new BusinessException(ErrorCode.INVALID_INPUT));
 
         // when & then
-        mockMvc.perform(post("/api/v1/coupon-issues/{issueId}/use", 42L))
+        mockMvc.perform(post("/api/coupon-issues/{issueId}/use", 42L))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("INVALID_INPUT"));
     }
 
     @RestController

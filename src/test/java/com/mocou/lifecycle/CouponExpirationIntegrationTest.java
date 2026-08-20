@@ -3,7 +3,6 @@ package com.mocou.lifecycle;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.mocou.support.MySqlContainerTest;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,7 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = "spring.batch.jdbc.initialize-schema=never")
-class CouponExpirationIntegrationTest extends MySqlContainerTest {
+class CouponExpirationIntegrationTest extends CouponLifecycleIntegrationTestSupport {
 
     private static final long ISSUE_ID = 3001L;
 
