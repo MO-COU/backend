@@ -27,13 +27,15 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
     public Optional<AdminCouponStock> findStock(long couponId) {
         return jdbcTemplate
                 .query(
-                        "SELECT c.coupon_id, c.status, cs.total_quantity, "
+                        "SELECT c.coupon_id, c.name, c.open_at, c.status, cs.total_quantity, "
                                 + "cs.remaining_quantity, cs.updated_at "
                                 + "FROM coupon c JOIN coupon_stock cs ON cs.coupon_id = c.coupon_id "
                                 + "WHERE c.coupon_id = ?",
                         (resultSet, rowNumber) ->
                                 new AdminCouponStock(
                                         resultSet.getLong("coupon_id"),
+                                        resultSet.getString("name"),
+                                        resultSet.getTimestamp("open_at").toLocalDateTime(),
                                         resultSet.getInt("total_quantity"),
                                         resultSet.getInt("total_quantity")
                                                 - resultSet.getInt("remaining_quantity"),
@@ -58,14 +60,21 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
     @Override
     public List<AdminCouponIssue> findIssues(long couponId, int size, long offset) {
         return jdbcTemplate.query(
-                "SELECT coupon_issue_id, coupon_id, member_id, status, issued_at, used_at, "
-                        + "expires_at FROM coupon_issue WHERE coupon_id = ? "
-                        + "ORDER BY issued_at DESC, coupon_issue_id DESC LIMIT ? OFFSET ?",
+                "SELECT ci.coupon_issue_id, ci.coupon_id, ci.member_id, "
+                        + "m.name AS member_name, m.email AS member_email, "
+                        + "m.phone AS member_phone, ci.status, ci.issued_at, ci.used_at, "
+                        + "ci.expires_at FROM coupon_issue ci "
+                        + "JOIN member m ON m.member_id = ci.member_id "
+                        + "WHERE ci.coupon_id = ? "
+                        + "ORDER BY ci.issued_at DESC, ci.coupon_issue_id DESC LIMIT ? OFFSET ?",
                 (resultSet, rowNumber) ->
-                        new AdminCouponIssue(
+                        AdminCouponIssue.withMaskedMember(
                                 resultSet.getLong("coupon_issue_id"),
                                 resultSet.getLong("coupon_id"),
                                 resultSet.getLong("member_id"),
+                                resultSet.getString("member_name"),
+                                resultSet.getString("member_email"),
+                                resultSet.getString("member_phone"),
                                 resultSet.getString("status"),
                                 resultSet.getTimestamp("issued_at").toLocalDateTime(),
                                 toLocalDateTime(resultSet.getTimestamp("used_at")),

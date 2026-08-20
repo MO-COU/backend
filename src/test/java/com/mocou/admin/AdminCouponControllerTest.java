@@ -46,6 +46,9 @@ class AdminCouponControllerTest {
                         30L,
                         COUPON_ID,
                         100L,
+                        "홍*동",
+                        "ho*****@example.com",
+                        "010-****-5678",
                         "ISSUED",
                         LocalDateTime.of(2026, 8, 19, 10, 0),
                         null,
@@ -59,6 +62,11 @@ class AdminCouponControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.content[0].issueId").value(30L))
                 .andExpect(jsonPath("$.data.content[0].memberId").value(100L))
+                .andExpect(jsonPath("$.data.content[0].memberName").value("홍*동"))
+                .andExpect(
+                        jsonPath("$.data.content[0].memberEmail")
+                                .value("ho*****@example.com"))
+                .andExpect(jsonPath("$.data.content[0].memberPhone").value("010-****-5678"))
                 .andExpect(jsonPath("$.data.page").value(0))
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
@@ -71,6 +79,8 @@ class AdminCouponControllerTest {
         AdminCouponStock stock =
                 new AdminCouponStock(
                         COUPON_ID,
+                        "8월 3주차 선착순 쿠폰",
+                        LocalDateTime.of(2026, 8, 17, 10, 0),
                         10_000,
                         8_000,
                         2_000,
@@ -82,6 +92,8 @@ class AdminCouponControllerTest {
         mockMvc.perform(get("/api/admin/coupons/{couponId}/stock", COUPON_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.couponName").value("8월 3주차 선착순 쿠폰"))
+                .andExpect(jsonPath("$.data.openAt").value("2026-08-17T10:00:00"))
                 .andExpect(jsonPath("$.data.totalQuantity").value(10_000))
                 .andExpect(jsonPath("$.data.issuedQuantity").value(8_000))
                 .andExpect(jsonPath("$.data.remainingQuantity").value(2_000))

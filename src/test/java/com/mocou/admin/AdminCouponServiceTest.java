@@ -35,6 +35,9 @@ class AdminCouponServiceTest {
                         30L,
                         COUPON_ID,
                         100L,
+                        "홍*동",
+                        "ho*****@example.com",
+                        "010-****-5678",
                         "ISSUED",
                         LocalDateTime.of(2026, 8, 19, 10, 0),
                         null,
@@ -60,6 +63,8 @@ class AdminCouponServiceTest {
         AdminCouponStock stock =
                 new AdminCouponStock(
                         COUPON_ID,
+                        "8월 3주차 선착순 쿠폰",
+                        LocalDateTime.of(2026, 8, 17, 10, 0),
                         10_000,
                         8_000,
                         2_000,

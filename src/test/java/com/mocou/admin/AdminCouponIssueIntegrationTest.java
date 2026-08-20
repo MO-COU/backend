@@ -32,6 +32,10 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
         assertThat(result.totalPages()).isEqualTo(2);
         assertThat(result.hasNext()).isTrue();
         assertThat(result.content()).extracting(AdminCouponIssue::issueId).containsExactly(3002L);
+        assertThat(result.content().getFirst().memberName()).isEqualTo("회*2");
+        assertThat(result.content().getFirst().memberEmail())
+                .isEqualTo("me*****@example.com");
+        assertThat(result.content().getFirst().memberPhone()).isEqualTo("010-****-0002");
     }
 
     @Test
@@ -48,6 +52,8 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
         AdminCouponStock result = service.getStock(COUPON_ID);
 
         // then
+        assertThat(result.couponName()).isEqualTo("관리자 조회 테스트 쿠폰");
+        assertThat(result.openAt()).isNotNull();
         assertThat(result.totalQuantity()).isEqualTo(10_000);
         assertThat(result.issuedQuantity()).isEqualTo(8_000);
         assertThat(result.remainingQuantity()).isEqualTo(2_000);
@@ -60,8 +66,8 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
                         + "(1001, 'member1@example.com', '회원1', '01000000001'), "
                         + "(1002, 'member2@example.com', '회원2', '01000000002')");
         jdbcTemplate.update(
-                "INSERT INTO coupon (coupon_id, name, discount_rate, open_at, close_at, status) "
-                        + "VALUES (?, '관리자 조회 테스트 쿠폰', 10, "
+                "INSERT INTO coupon (coupon_id, name, open_at, close_at, status) "
+                        + "VALUES (?, '관리자 조회 테스트 쿠폰', "
                         + "CURRENT_TIMESTAMP - INTERVAL 1 DAY, "
                         + "CURRENT_TIMESTAMP + INTERVAL 1 DAY, 'OPEN')",
                 COUPON_ID);
