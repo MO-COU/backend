@@ -2,7 +2,9 @@ package com.mocou.datagen;
 
 import com.mocou.support.MySqlContainerTest;
 import java.sql.Timestamp;
+import java.time.DayOfWeek;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
@@ -29,10 +31,10 @@ class DatagenIntegrationTest extends MySqlContainerTest {
     @Autowired private DatagenProperties properties;
 
     @Test
-    @DisplayName("더미 쿠폰과 시연 쿠폰을 재고와 함께 생성한다")
-    void seedsDummyCouponsAndOneDemoCoupon() {
+    @DisplayName("회차 전체와 시연 회차를 재고와 함께 생성한다")
+    void seedsEveryRoundAndOneDemoRound() {
         // given
-        int expectedCount = properties.dummyCouponCount() + 1;
+        int expectedCount = properties.roundCount() + 1;
 
         // when
         List<CouponSeedSpec> specs = couponSeeder.seed(BASE_TIME);
@@ -53,8 +55,8 @@ class DatagenIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
-    @DisplayName("시연 쿠폰은 이미 열려 있어 부하 테스트가 곧바로 발급할 수 있다")
-    void demoCouponIsOpenSoLoadTestCanIssueImmediately() {
+    @DisplayName("시연 회차는 이미 열려 있어 부하 테스트가 곧바로 발급할 수 있다")
+    void demoRoundIsOpenSoLoadTestCanIssueImmediately() {
         // given
         long demoCouponId = couponSeeder.demoCouponId();
 
@@ -64,6 +66,55 @@ class DatagenIntegrationTest extends MySqlContainerTest {
         // then
         assertThat(couponTime("open_at", demoCouponId)).isBefore(BASE_TIME);
         assertThat(couponTime("close_at", demoCouponId)).isAfter(BASE_TIME);
+    }
+
+    @Test
+    @DisplayName("모든 회차가 매주 월요일 10시에 7일 간격으로 열린다")
+    void everyRoundOpensOnMondayAtTenWithWeeklyGap() {
+        // when
+        List<CouponSeedSpec> specs = couponSeeder.specs(BASE_TIME);
+
+        // then
+        List<CouponSeedSpec> rounds = specs.subList(0, properties.roundCount());
+        assertThat(rounds)
+                .allSatisfy(
+                        round -> {
+                            assertThat(round.openAt().getDayOfWeek()).isEqualTo(DayOfWeek.MONDAY);
+                            assertThat(round.openAt().toLocalTime()).isEqualTo(LocalTime.of(10, 0));
+                        });
+
+        for (int i = 1; i < rounds.size(); i++) {
+            assertThat(rounds.get(i).openAt())
+                    .isEqualTo(rounds.get(i - 1).openAt().plusWeeks(1));
+        }
+    }
+
+    @Test
+    @DisplayName("회차 번호가 클수록 최근이며 마지막 회차는 기준 시각 이전에 열려 있다")
+    void lastRoundIsTheMostRecentAlreadyOpenedOne() {
+        // when
+        List<CouponSeedSpec> specs = couponSeeder.specs(BASE_TIME);
+
+        // then
+        CouponSeedSpec firstRound = specs.get(0);
+        CouponSeedSpec lastRound = specs.get(properties.roundCount() - 1);
+        assertThat(firstRound.openAt()).isBefore(lastRound.openAt());
+        assertThat(lastRound.openAt()).isBeforeOrEqualTo(BASE_TIME);
+    }
+
+    /** 오픈 시각이 아직 지나지 않은 회차를 마지막 회차로 잡으면, 열리기 전에 발급된 이력이 만들어진다. */
+    @Test
+    @DisplayName("월요일 오픈 시각 전에 실행하면 마지막 회차가 지난주로 물러난다")
+    void movesLastRoundBackWhenRunBeforeMondayOpenTime() {
+        // given - 월요일 09시. 오픈 시각 10시가 아직 안 됐다
+        LocalDateTime mondayBeforeOpen = LocalDateTime.of(2026, 8, 17, 9, 0);
+
+        // when
+        List<CouponSeedSpec> specs = couponSeeder.specs(mondayBeforeOpen);
+
+        // then
+        LocalDateTime lastOpenAt = specs.get(properties.roundCount() - 1).openAt();
+        assertThat(lastOpenAt).isEqualTo(LocalDateTime.of(2026, 8, 10, 10, 0));
     }
 
     @Test
