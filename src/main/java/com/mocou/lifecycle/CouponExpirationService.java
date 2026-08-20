@@ -1,6 +1,8 @@
 package com.mocou.lifecycle;
 
+import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -18,11 +20,19 @@ public class CouponExpirationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public int expireDueIssues(LocalDateTime cutoffAt, int chunkSize) {
         List<CouponExpirationCandidate> candidates = repository.findDueIssues(cutoffAt, chunkSize);
-        for (CouponExpirationCandidate candidate : candidates) {
-            if (repository.markExpired(candidate.couponIssueId(), cutoffAt) == 1) {
-                repository.saveExpiredHistory(candidate);
+        int[] updateCounts = repository.markExpiredBatch(candidates, cutoffAt);
+        List<CouponExpirationCandidate> expiredCandidates = new ArrayList<>();
+
+        for (int index = 0; index < candidates.size(); index++) {
+            if (updateCounts[index] > 0 || updateCounts[index] == Statement.SUCCESS_NO_INFO) {
+                expiredCandidates.add(candidates.get(index));
             }
         }
+
+        if (!expiredCandidates.isEmpty()) {
+            repository.saveExpiredHistories(expiredCandidates);
+        }
+
         return candidates.size();
     }
 }

@@ -1,6 +1,5 @@
 package com.mocou.lifecycle;
 
-import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,7 +26,7 @@ public class JdbcCouponExpirationRepository implements CouponExpirationRepositor
         return jdbcTemplate.query(
                 "SELECT coupon_issue_id, expires_at FROM coupon_issue "
                         + "WHERE status = 'ISSUED' AND expires_at <= ? "
-                        + "ORDER BY coupon_issue_id LIMIT ?",
+                        + "ORDER BY expires_at, coupon_issue_id LIMIT ?",
                 (resultSet, rowNumber) ->
                         new CouponExpirationCandidate(
                                 resultSet.getLong("coupon_issue_id"),
@@ -37,21 +36,32 @@ public class JdbcCouponExpirationRepository implements CouponExpirationRepositor
     }
 
     @Override
-    public int markExpired(long issueId, LocalDateTime cutoffAt) {
-        return jdbcTemplate.update(
+    public int[] markExpiredBatch(
+            List<CouponExpirationCandidate> candidates, LocalDateTime cutoffAt) {
+        return jdbcTemplate.batchUpdate(
                 "UPDATE coupon_issue SET status = 'EXPIRED' "
                         + "WHERE coupon_issue_id = ? AND status = 'ISSUED' AND expires_at <= ?",
-                issueId,
-                cutoffAt);
+                candidates.stream()
+                        .map(candidate -> new Object[] {candidate.couponIssueId(), cutoffAt})
+                        .toList());
     }
 
     @Override
-    public void saveExpiredHistory(CouponExpirationCandidate candidate) {
-        jdbcTemplate.update(
+    public void saveExpiredHistories(List<CouponExpirationCandidate> candidates) {
+        jdbcTemplate.batchUpdate(
                 "INSERT INTO coupon_issue_history "
                         + "(coupon_issue_id, from_status, to_status, changed_at, idempotency_key) "
                         + "VALUES (?, 'ISSUED', 'EXPIRED', CURRENT_TIMESTAMP, ?)",
-                candidate.couponIssueId(),
-                "EXPIRE:" + candidate.couponIssueId() + ":" + candidate.expiresAt());
+                candidates.stream()
+                        .map(
+                                candidate ->
+                                        new Object[] {
+                                            candidate.couponIssueId(),
+                                            "EXPIRE:"
+                                                    + candidate.couponIssueId()
+                                                    + ":"
+                                                    + candidate.expiresAt()
+                                        })
+                        .toList());
     }
 }
