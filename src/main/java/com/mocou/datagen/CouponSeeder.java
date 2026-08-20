@@ -21,8 +21,8 @@ class CouponSeeder {
 
     private static final String DEMO_COUPON_NAME = "선착순 시연 쿠폰";
     private static final String INSERT_COUPON_SQL =
-            "INSERT INTO coupon (coupon_id, name, discount_rate, open_at, close_at, status, created_at) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+            "INSERT INTO coupon (coupon_id, name, open_at, close_at, status, created_at) "
+                    + "VALUES (?, ?, ?, ?, ?, ?)";
     private static final String INSERT_STOCK_SQL =
             "INSERT INTO coupon_stock (coupon_id, total_quantity, remaining_quantity) VALUES (?, ?, ?)";
 
@@ -37,7 +37,6 @@ class CouponSeeder {
                     new CouponSeedSpec(
                             index,
                             "더미 캠페인 " + index,
-                            5 * index,
                             baseTime.minusDays(90),
                             baseTime,
                             "CLOSED",
@@ -47,7 +46,6 @@ class CouponSeeder {
                 new CouponSeedSpec(
                         demoCouponId(),
                         DEMO_COUPON_NAME,
-                        30,
                         baseTime.minusDays(1),
                         baseTime.plusDays(365),
                         "OPEN",
@@ -67,7 +65,6 @@ class CouponSeeder {
                     INSERT_COUPON_SQL,
                     spec.couponId(),
                     spec.name(),
-                    spec.discountRate(),
                     Timestamp.valueOf(spec.openAt()),
                     Timestamp.valueOf(spec.closeAt()),
                     spec.status(),

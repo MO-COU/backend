@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 record CouponSeedSpec(
         long couponId,
         String name,
-        int discountRate,
         LocalDateTime openAt,
         LocalDateTime closeAt,
         String status,
