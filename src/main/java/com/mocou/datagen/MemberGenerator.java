@@ -34,6 +34,9 @@ class MemberGenerator {
     /** 회원 번호를 자릿수별로 흩뜨리기 위한 곱수. 결정론적이면서 연속된 번호가 비슷한 값으로 몰리지 않게 한다. */
     private static final long SCRAMBLE = 2_654_435_761L;
 
+    /** 가입일을 뿌릴 기간. 이벤트 시작 1년 전부터 회원을 모았다고 본다. */
+    private static final int SIGNUP_SPREAD_DAYS = 365;
+
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
     private final DatagenProperties properties;
@@ -44,16 +47,17 @@ class MemberGenerator {
      * <p>청크 하나가 트랜잭션 하나다. 전체를 한 트랜잭션으로 묶으면 언두 로그가 계속 쌓이고 실패 시 롤백이 오래 걸리며, 트랜잭션을 아예 걸지
      * 않으면 autocommit이라 행마다 커밋되어 커밋 횟수만큼 디스크 동기화가 발생한다.
      *
+     * @param signupUntil 가입일의 상한. 발급 이력보다 늦게 가입한 회원이 생기지 않도록 첫 회차 오픈 시각을 받는다
      * @return 적재한 회원 수
      */
-    int generate(LocalDateTime baseTime) {
+    int generate(LocalDateTime signupUntil) {
         int total = properties.memberCount();
         int chunkSize = properties.chunkSize();
         LocalDateTime startedAt = LocalDateTime.now();
 
         for (int from = 1; from <= total; from += chunkSize) {
             int to = Math.min(from + chunkSize - 1, total);
-            List<Object[]> rows = rows(from, to, baseTime);
+            List<Object[]> rows = rows(from, to, signupUntil);
             transactionTemplate.executeWithoutResult(status -> jdbcTemplate.batchUpdate(INSERT_SQL, rows));
             log.debug("회원 적재 진행 {}/{}", to, total);
         }
@@ -63,7 +67,7 @@ class MemberGenerator {
         return total;
     }
 
-    private List<Object[]> rows(int from, int to, LocalDateTime baseTime) {
+    private List<Object[]> rows(int from, int to, LocalDateTime signupUntil) {
         List<Object[]> rows = new ArrayList<>(to - from + 1);
         for (int index = from; index <= to; index++) {
             rows.add(
@@ -72,7 +76,7 @@ class MemberGenerator {
                         email(index),
                         name(index),
                         phone(index),
-                        Timestamp.valueOf(createdAt(index, baseTime))
+                        Timestamp.valueOf(createdAt(index, signupUntil))
                     });
         }
         return rows;
@@ -94,8 +98,9 @@ class MemberGenerator {
         return String.format("010-%04d-%04d", (scrambled / 10_000) % 10_000, scrambled % 10_000);
     }
 
-    static LocalDateTime createdAt(int index, LocalDateTime baseTime) {
-        return baseTime.minusDays(90 - (index % 90));
+    /** 첫 회차 이전 1년에 고르게 뿌린다. 가입도 하지 않은 회원이 쿠폰을 받은 것으로 기록되면 안 된다. */
+    static LocalDateTime createdAt(int index, LocalDateTime signupUntil) {
+        return signupUntil.minusDays(1 + (index % SIGNUP_SPREAD_DAYS));
     }
 
     private static long scramble(int index) {
