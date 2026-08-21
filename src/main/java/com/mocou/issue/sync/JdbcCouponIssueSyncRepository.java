@@ -33,7 +33,7 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
 
     private static final String INSERT_COUPON_ISSUE_HISTORY = """
             INSERT INTO coupon_issue_history (coupon_issue_id, from_status, to_status, changed_at, idempotency_key)
-            VALUES (:couponIssueId, NULL, 'ISSUED', :changedAt, :idempotencyKey)
+            VALUES (:couponIssueId, 'UNISSUED', 'ISSUED', :changedAt, :idempotencyKey)
             """;
 
     private static final String DECREASE_COUPON_STOCK = """
@@ -99,7 +99,7 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
 
             long couponIssueId = keyHolder.getKey().longValue();
 
-            // NULL → ISSUED 최초 이력, 멱등키 "ISSUE:{couponIssueId}".
+            // UNISSUED → ISSUED 최초 이력, 멱등키 "ISSUE:{couponIssueId}".
             jdbcClient.sql(INSERT_COUPON_ISSUE_HISTORY)
                     .param("couponIssueId", couponIssueId)
                     .param("changedAt", event.issuedAt())

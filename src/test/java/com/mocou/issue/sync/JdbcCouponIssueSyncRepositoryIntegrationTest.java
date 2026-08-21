@@ -117,7 +117,7 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
                 SELECT COUNT(*) FROM coupon_issue_history h
                 JOIN coupon_issue i ON i.coupon_issue_id = h.coupon_issue_id
                 WHERE i.coupon_id = ? AND i.member_id = ?
-                AND h.from_status IS NULL AND h.to_status = 'ISSUED'
+                AND h.from_status = 'UNISSUED' AND h.to_status = 'ISSUED'
                 """,
                 Integer.class,
                 couponId,
@@ -162,16 +162,14 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
                 INSERT INTO coupon (
                     coupon_id,
                     name,
-                    discount_rate,
                     open_at,
                     close_at,
                     status
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 couponId,
                 "동기화 대상 조회 테스트 쿠폰",
-                10,
                 OPEN_AT,
                 CLOSE_AT,
                 status);
