@@ -1,0 +1,33 @@
+package com.mocou.issue.sync;
+
+import java.util.List;
+
+/**
+ * Redis Stream → DB 동기화 컨슈머가 사용하는 저장소.
+ *
+ * <p>Issue #39 체크리스트 2번(OPEN 상태 쿠폰 목록 조회) 담당. 컨슈머는 이 목록으로
+ * "이번 실행에서 어떤 couponId의 Stream을 읽어야 하는지"를 결정한다. Redis 쪽에
+ * 별도로 "지금 열려 있는 쿠폰 목록"을 관리하는 곳이 없어서, OPEN 여부는 항상 이
+ * 저장소(DB)를 기준으로 조회한다.
+ */
+public interface CouponIssueSyncRepository {
+
+    /**
+     * status가 'OPEN'인 쿠폰의 coupon_id 목록을 반환한다.
+     *
+     * <p>컨슈머는 매 실행마다(스케줄 틱마다) 이 메서드를 호출해서 대상 Stream을
+     * 다시 결정한다 — 쿠폰이 새로 열리거나 닫히는 걸 별도 이벤트 없이도 다음
+     * 실행에서 자연스럽게 반영하기 위함이다.
+     */
+    List<Long> findOpenCouponIds();
+
+    /**
+     * 이벤트 목록을 하나의 트랜잭션으로 {@code coupon_issue}/{@code coupon_issue_history}에
+     * 반영하고, 실제로 새로 저장된 건수만큼 {@code coupon_stock}을 차감한다.
+     *
+     * <p>이미 처리된(재전달된) 이벤트는 {@code coupon_issue}의 UNIQUE(coupon_id, member_id)
+     * 제약에 걸려 조용히 skip된다 — 예외를 던지지 않고 정상 반환하므로, 호출부는 반환 후
+     * 배치 전체를 안전하게 XACK할 수 있다.
+     */
+    void saveBatch(long couponId, List<CouponIssueSyncEvent> events);
+}
