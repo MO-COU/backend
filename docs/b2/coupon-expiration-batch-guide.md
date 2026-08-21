@@ -6,9 +6,9 @@
 
 ```text
 application.yml / 실행 옵션
-        ↓
-CouponExpirationBatchProperties
-        ↓
+        ├─ scheduler-enabled, fixed-delay-ms → CouponExpirationScheduler
+        └─ chunk-size → CouponExpirationBatchProperties → CouponExpirationTasklet
+
 CouponExpirationScheduler
         ↓
 CouponExpirationJobLauncher
@@ -27,7 +27,7 @@ CouponExpirationService → JdbcCouponExpirationRepository
 
 | 클래스 | 책임 |
 | --- | --- |
-| `CouponExpirationBatchProperties` | 실행 간격과 청크 크기 설정값을 바인딩한다. |
+| `CouponExpirationBatchProperties` | 청크 크기 설정값을 Tasklet에 전달한다. |
 | `CouponExpirationScheduler` | 설정된 주기마다 Job 실행을 요청한다. |
 | `CouponExpirationJobLauncher` | 중복 실행 방지, 실패 Job 재시작, 새 Job 시작 정책을 처리한다. |
 | `ExpirationClock` / `JdbcExpirationClock` | 앱 서버 시간이 아닌 DB 시각을 만료 기준으로 제공한다. |
@@ -43,12 +43,14 @@ CouponExpirationService → JdbcCouponExpirationRepository
 mocou:
   lifecycle:
     expiration:
+      scheduler-enabled: true
       fixed-delay-ms: 60000
       chunk-size: 2000
 ```
 
 | 설정 | 기본값 | 변경 효과 |
 | --- | ---: | --- |
+| `scheduler-enabled` | `true` | `true`면 자동 스케줄을 실행하고, `false`면 자동 스케줄을 중지한다. |
 | `fixed-delay-ms` | `60000` | 이전 Job 실행이 끝난 뒤 다음 자동 실행까지 기다리는 시간(ms)이다. |
 | `chunk-size` | `2000` | 한 트랜잭션에서 조회·처리할 최대 만료 후보 수다. |
 
@@ -56,6 +58,7 @@ mocou:
 
 | 바꾸려는 대상 | 수정 위치 |
 | --- | --- |
+| 자동 실행 켜기·끄기 | `application.yml`의 `scheduler-enabled` |
 | 자동 실행 주기 | `application.yml`의 `fixed-delay-ms` |
 | 청크 크기 | `application.yml`의 `chunk-size` |
 | Job 실행·재시작 정책 | `CouponExpirationJobLauncher` |
