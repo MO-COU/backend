@@ -8,9 +8,10 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
-# 빌드한 이미지를 저장할 주소 정의 {MO-COU}
+# 빌드한 이미지를 저장할 주소 정의.
+# 레지스트리 저장소 경로는 소문자만 허용되므로 고정 소문자로 적는다 (docker-compose.prod.yml과 동일).
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/backend
+  IMAGE: ghcr.io/mo-cou/backend
 
 jobs:
   # 1. build-and-push : 이미지 생성 후 저장소에 올림
