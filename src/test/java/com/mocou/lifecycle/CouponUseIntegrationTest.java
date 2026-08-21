@@ -29,6 +29,14 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
     void storesUsedStateAndHistoryInMySql() {
         insertIssuedCoupon(ISSUE_ID);
 
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT from_status FROM coupon_issue_history "
+                                        + "WHERE coupon_issue_id = ? AND to_status = 'ISSUED'",
+                                String.class,
+                                ISSUE_ID))
+                .isEqualTo("UNISSUED");
+
         CouponUseResult result = service.use(ISSUE_ID, "use-integration-1");
 
         assertThat(result.status()).isEqualTo(CouponIssueStatus.USED);
