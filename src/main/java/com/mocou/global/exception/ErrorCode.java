@@ -33,6 +33,7 @@ public enum ErrorCode {
     NOT_MEMBER(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다"),
 
     // 서버
+    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스를 일시적으로 사용할 수 없습니다"),
     SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다");
 
     private final HttpStatus status;
