@@ -1,16 +1,20 @@
 package com.mocou.global.exception;
 
-import com.mocou.global.response.ApiResponse;
 import java.util.Arrays;
 import java.util.stream.Collectors;
-import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import com.mocou.global.response.ApiResponse;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 컨트롤러에서 개별적으로 try-catch 하지 않아도, 여기서 예외를 잡아 ApiResponse 형식으로 통일해서 내려준다.
@@ -47,6 +51,21 @@ public class GlobalExceptionHandler {
         log.warn("[MethodNotSupportedException] {}", exception.getMessage());
         return ResponseEntity.status(ErrorCode.METHOD_NOT_ALLOWED.getStatus())
                 .body(ApiResponse.error(ErrorCode.METHOD_NOT_ALLOWED));
+    }
+
+    @ExceptionHandler(RedisConnectionFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleRedisConnectionFailureException(
+            RedisConnectionFailureException exception) {
+        Throwable cause = exception.getMostSpecificCause();
+
+        log.error(
+                "[RedisConnectionFailure] type={}, causeType={}\n{}",
+                exception.getClass().getName(),
+                cause.getClass().getName(),
+                stackFrames(cause));
+
+        return ResponseEntity.status(ErrorCode.SERVICE_UNAVAILABLE.getStatus())
+                .body(ApiResponse.error(ErrorCode.SERVICE_UNAVAILABLE));
     }
 
     // 위 핸들러들에 안 걸리는 모든 예외(NPE, DB 오류 등)에 대한 마지막 로직.
