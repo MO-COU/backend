@@ -8,19 +8,9 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "mocou.lifecycle.expiration")
 public class CouponExpirationBatchProperties {
 
+    /** 기본값은 application.yml에서 관리하며, 이 객체는 청크 크기를 Tasklet에 전달한다. */
     @Min(1)
-    private long fixedDelayMs = 60_000;
-
-    @Min(1)
-    private int chunkSize = 2_000;
-
-    public long getFixedDelayMs() {
-        return fixedDelayMs;
-    }
-
-    public void setFixedDelayMs(long fixedDelayMs) {
-        this.fixedDelayMs = fixedDelayMs;
-    }
+    private int chunkSize;
 
     public int getChunkSize() {
         return chunkSize;
