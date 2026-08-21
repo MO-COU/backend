@@ -20,6 +20,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -131,6 +132,31 @@ public class CouponIssueReservationControllerTest {
                         .value(errorCode.name()))
                 .andExpect(jsonPath("$.error.message")
                         .value(errorCode.getMessage()));
+    }
+
+    @Test
+    @DisplayName("Redis 연결 장애 발생 시 503 SERVICE_UNAVAILABLE 응답을 반환한다")
+    void returnsServiceUnavailableWhenRedisConnectionFails()
+            throws Exception {
+        // given
+        given(service.reserve(COUPON_ID, MEMBER_ID))
+                .willThrow(new RedisConnectionFailureException("Redis 연결 실패"));
+
+        // when, then
+        mockMvc.perform(
+                        post("/api/coupons/{couponId}/issues", COUPON_ID)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "memberId": 100
+                                        }
+                                        """))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code")
+                        .value("SERVICE_UNAVAILABLE"))
+                .andExpect(jsonPath("$.error.message")
+                        .value("서비스를 일시적으로 사용할 수 없습니다"));
     }
 
     private static Stream<Arguments> invalidRequests() {

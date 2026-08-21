@@ -9,7 +9,7 @@ public interface CouponExpirationRepository {
 
     List<CouponExpirationCandidate> findDueIssues(LocalDateTime cutoffAt, int limit);
 
-    int markExpired(long issueId, LocalDateTime cutoffAt);
+    int[] markExpiredBatch(List<CouponExpirationCandidate> candidates, LocalDateTime cutoffAt);
 
-    void saveExpiredHistory(CouponExpirationCandidate candidate);
+    void saveExpiredHistories(List<CouponExpirationCandidate> candidates);
 }

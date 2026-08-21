@@ -27,12 +27,11 @@ abstract class CouponLifecycleIntegrationTestSupport extends MySqlContainerTest 
                 "테스트 회원",
                 "01000000000");
         jdbcTemplate.update(
-                "INSERT INTO coupon (coupon_id, name, discount_rate, open_at, close_at, status) "
-                        + "VALUES (?, ?, ?, CURRENT_TIMESTAMP - INTERVAL 1 DAY, "
+                "INSERT INTO coupon (coupon_id, name, open_at, close_at, status) "
+                        + "VALUES (?, ?, CURRENT_TIMESTAMP - INTERVAL 1 DAY, "
                         + "CURRENT_TIMESTAMP + INTERVAL 1 DAY, ?)",
                 FIXTURE_COUPON_ID,
                 "테스트 쿠폰",
-                10,
                 "OPEN");
         jdbcTemplate.update(
                 "INSERT INTO coupon_issue "
@@ -45,7 +44,7 @@ abstract class CouponLifecycleIntegrationTestSupport extends MySqlContainerTest 
         jdbcTemplate.update(
                 "INSERT INTO coupon_issue_history "
                         + "(coupon_issue_id, from_status, to_status, changed_at, idempotency_key) "
-                        + "VALUES (?, NULL, 'ISSUED', CURRENT_TIMESTAMP - INTERVAL 1 DAY, ?)",
+                        + "VALUES (?, 'UNISSUED', 'ISSUED', CURRENT_TIMESTAMP - INTERVAL 1 DAY, ?)",
                 issueId,
                 "ISSUE:" + issueId);
     }

@@ -30,6 +30,8 @@ class DatagenRunner implements ApplicationRunner {
     private final DatagenProperties properties;
     private final CouponSeeder couponSeeder;
     private final MemberGenerator memberGenerator;
+    private final IssueGenerator issueGenerator;
+    private final StockReconciler stockReconciler;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -41,10 +43,14 @@ class DatagenRunner implements ApplicationRunner {
         LocalDateTime baseTime = resolveBaseTime();
         log.info("더미데이터 생성 시작 (기준 시각 {}, 시드 {})", baseTime, properties.seed());
 
-        List<CouponSeedSpec> coupons = couponSeeder.seed(baseTime);
-        int members = memberGenerator.generate(baseTime);
+        List<CouponSeedSpec> rounds = couponSeeder.seed(baseTime);
+        // 회원은 첫 회차보다 먼저 가입해 있어야 한다. 그래야 가입 전에 쿠폰을 받은 이력이 생기지 않는다.
+        int members = memberGenerator.generate(rounds.get(0).openAt());
+        int issues = issueGenerator.generate(rounds, baseTime, couponSeeder.demoCouponId());
+        // 재고는 미리 정하지 않고 실제로 들어간 발급 건을 세어 역산한다.
+        stockReconciler.reconcile();
 
-        log.info("더미데이터 생성 완료 (쿠폰 {}종, 회원 {}건)", coupons.size(), members);
+        log.info("더미데이터 생성 완료 (회차 {}개, 회원 {}건, 발급 {}건)", rounds.size(), members, issues);
     }
 
     private boolean isAlreadySeeded() {

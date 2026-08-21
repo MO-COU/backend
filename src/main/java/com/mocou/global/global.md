@@ -44,28 +44,27 @@ return ApiResponse.success();      // 데이터 없는 성공 (상태 변경 API
 
 **`ErrorCode`**: 실패 케이스를 코드로 모아둔 enum입니다. **새로운 실패 상황이 생기면 각자 문자열을 만들지 말고 여기에 항목을 추가**해주세요 (HTTP 상태코드 + 기본 메시지를 같이 들고 있습니다).
 
-현재 정의된 코드: `INVALID_INPUT`, `METHOD_NOT_ALLOWED`, `SOLD_OUT`, `DUPLICATE`, `NOT_MEMBER`, `NOT_OPEN_YET`, `ISSUE_NOT_FOUND`, `IDEMPOTENCY_CONFLICT`, `INVALID_STATE_TRANSITION`, `COUPON_EXPIRED`, `SYSTEM_ERROR`, `COUPON_ISSUE_NOT_READY`, `ISSUE_CLOSED`
-
-팀원들이 더 추가할 예정 : ex)`COUPON_NOT_FOUND`, `SERVICE_UNAVAILABLE`
+현재 정의된 코드: `INVALID_INPUT`, `METHOD_NOT_ALLOWED`, `COUPON_NOT_FOUND`, `SOLD_OUT`, `DUPLICATE`, `NOT_MEMBER`, `NOT_OPEN_YET`, `ISSUE_NOT_FOUND`, `IDEMPOTENCY_CONFLICT`, `INVALID_STATE_TRANSITION`, `COUPON_EXPIRED`, `SYSTEM_ERROR`, `COUPON_ISSUE_NOT_READY`, `ISSUE_CLOSED`, `SERVICE_UNAVAILABLE`
 
 **`BusinessException`**: "버그가 아니라 예상된 실패"임을 표현하는 예외입니다. 서비스 로직에서 이렇게 던지면 됩니다.
 ```java
 if (coupon == null) {
-    throw new BusinessException(ErrorCode.NOT_MEMBER);
+    throw new BusinessException(ErrorCode.COUPON_NOT_FOUND);
 }
 ```
 컨트롤러에서 try-catch로 잡을 필요가 없습니다 — 아래 핸들러가 대신 처리합니다.
 
-**`GlobalExceptionHandler`**: `@RestControllerAdvice`로, 예외를 가로채 `ApiResponse` 형식으로 통일해서 응답합니다. 처리하는 예외 4가지:
+**`GlobalExceptionHandler`**: `@RestControllerAdvice`로, 예외를 가로채 `ApiResponse` 형식으로 통일해서 응답합니다. 처리하는 예외 5가지:
 
 | 예외 | 상황 | 응답 코드 |
 |---|---|---|
 | `BusinessException` | 서비스 로직에서 의도적으로 던진 예외 | 예외에 담긴 `ErrorCode` |
 | `MethodArgumentNotValidException` | `@Valid` 검증 실패 | `INVALID_INPUT` |
 | `HttpRequestMethodNotSupportedException` | 잘못된 HTTP 메서드 | `METHOD_NOT_ALLOWED` |
+| `RedisConnectionFailureException` | Redis 연결 실패 | `SERVICE_UNAVAILABLE` |
 | `Exception`(그 외 전부) | NPE, DB 오류 등 예상 못 한 예외 | `SYSTEM_ERROR` |
 
-마지막 `Exception` 핸들러가 **최후의 안전망**입니다 — 위 세 가지에 안 걸리는 모든 예외를 잡아서, 클라이언트에게는 `SYSTEM_ERROR`라는 안전한 일반 메시지만 내려주고, 실제 원인(전체 스택트레이스)은 `log.error(...)`로 서버 로그에만 남깁니다. 이 로그는 `TraceIdFilter`가 심어둔 traceId와 함께 찍히므로, 클라이언트가 응답의 `traceId`를 알려주면 로그에서 바로 원인을 찾을 수 있습니다. 이 핸들러가 없으면 처리 안 된 예외는 Spring 기본 에러 응답이 그대로 나가서 "모든 API가 동일한 응답 형식을 쓴다"는 규칙이 깨집니다.
+마지막 `Exception` 핸들러가 **최후의 안전망**입니다 — 위 네 가지에 안 걸리는 모든 예외를 잡아서, 클라이언트에게는 `SYSTEM_ERROR`라는 안전한 일반 메시지만 내려주고, 실제 원인(전체 스택트레이스)은 `log.error(...)`로 서버 로그에만 남깁니다. 이 로그는 `TraceIdFilter`가 심어둔 traceId와 함께 찍히므로, 클라이언트가 응답의 `traceId`를 알려주면 로그에서 바로 원인을 찾을 수 있습니다. 이 핸들러가 없으면 처리 안 된 예외는 Spring 기본 에러 응답이 그대로 나가서 "모든 API가 동일한 응답 형식을 쓴다"는 규칙이 깨집니다.
 
 ## `logging` — 요청 추적
 

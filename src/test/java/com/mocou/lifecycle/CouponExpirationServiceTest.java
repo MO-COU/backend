@@ -20,23 +20,25 @@ class CouponExpirationServiceTest {
     private static final LocalDateTime CUTOFF_AT = LocalDateTime.of(2026, 8, 18, 18, 0);
     private static final CouponExpirationCandidate DUE_ISSUE =
             new CouponExpirationCandidate(42L, LocalDateTime.of(2026, 8, 18, 17, 0));
+    private static final CouponExpirationCandidate CONCURRENTLY_USED_ISSUE =
+            new CouponExpirationCandidate(43L, LocalDateTime.of(2026, 8, 18, 17, 30));
 
     @Mock private CouponExpirationRepository repository;
     @InjectMocks private CouponExpirationService service;
 
     @Test
-    @DisplayName("만료 대상 쿠폰을 만료 처리하고 이력을 저장한다")
+    @DisplayName("만료 성공한 쿠폰만 배치 이력을 저장한다")
     void expiresDueIssueAndStoresOneHistory() {
         // given
         given(repository.findDueIssues(CUTOFF_AT, 1)).willReturn(List.of(DUE_ISSUE));
-        given(repository.markExpired(DUE_ISSUE.couponIssueId(), CUTOFF_AT)).willReturn(1);
+        given(repository.markExpiredBatch(List.of(DUE_ISSUE), CUTOFF_AT)).willReturn(new int[] {1});
 
         // when
         int selectedCount = service.expireDueIssues(CUTOFF_AT, 1);
 
         // then
         assertThat(selectedCount).isEqualTo(1);
-        verify(repository).saveExpiredHistory(DUE_ISSUE);
+        verify(repository).saveExpiredHistories(List.of(DUE_ISSUE));
     }
 
     @Test
@@ -44,12 +46,28 @@ class CouponExpirationServiceTest {
     void doesNotStoreHistoryWhenConcurrentTransitionWon() {
         // given
         given(repository.findDueIssues(CUTOFF_AT, 1)).willReturn(List.of(DUE_ISSUE));
-        given(repository.markExpired(DUE_ISSUE.couponIssueId(), CUTOFF_AT)).willReturn(0);
+        given(repository.markExpiredBatch(List.of(DUE_ISSUE), CUTOFF_AT)).willReturn(new int[] {0});
 
         // when
         service.expireDueIssues(CUTOFF_AT, 1);
 
         // then
-        verify(repository, never()).saveExpiredHistory(DUE_ISSUE);
+        verify(repository, never()).saveExpiredHistories(List.of(DUE_ISSUE));
+    }
+
+    @Test
+    @DisplayName("경쟁 전이로 실패한 쿠폰은 이력 배치에서 제외한다")
+    void excludesConcurrentlyTransitionedIssueFromHistoryBatch() {
+        // given
+        List<CouponExpirationCandidate> candidates = List.of(DUE_ISSUE, CONCURRENTLY_USED_ISSUE);
+        given(repository.findDueIssues(CUTOFF_AT, 2)).willReturn(candidates);
+        given(repository.markExpiredBatch(candidates, CUTOFF_AT)).willReturn(new int[] {1, 0});
+
+        // when
+        int selectedCount = service.expireDueIssues(CUTOFF_AT, 2);
+
+        // then
+        assertThat(selectedCount).isEqualTo(2);
+        verify(repository).saveExpiredHistories(List.of(DUE_ISSUE));
     }
 }
