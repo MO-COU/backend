@@ -47,6 +47,8 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    # AWS_* 시크릿 스코프 지정
+    environment: MOCOU-AWS
     steps:
       # CD 전용 IAM 자격증명으로 인증 (팀원 개인 SSM 키 사용 금지)
       - name: Configure AWS credentials
