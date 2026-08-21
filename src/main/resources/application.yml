@@ -20,5 +20,9 @@ management:
 mocou:
   lifecycle:
     expiration:
+      # 만료 배치 설정의 기본값은 이 파일 한 곳에서만 관리한다. true면 자동 실행, false면 자동 실행 중지.
+      scheduler-enabled: true
+      # 자동 실행이 켜진 경우의 실행 간격(ms). 부하 테스트에서는 필요에 따라 짧게 조정한다.
       fixed-delay-ms: 60000
+      # 한 번의 트랜잭션에서 처리할 최대 만료 후보 수.
       chunk-size: 2000

@@ -12,10 +12,16 @@ import org.springframework.batch.core.launch.JobExecutionAlreadyRunningException
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
+// 기본값은 application.yml에서 관리한다. 실행 옵션은 이 값을 일시적으로 덮어쓸 수 있다.
+@ConditionalOnProperty(
+        prefix = "mocou.lifecycle.expiration",
+        name = "scheduler-enabled",
+        havingValue = "true")
 public class CouponExpirationScheduler {
 
     private static final String JOB_NAME = "couponExpirationJob";
@@ -36,7 +42,7 @@ public class CouponExpirationScheduler {
         this.repository = repository;
     }
 
-    @Scheduled(fixedDelayString = "${mocou.lifecycle.expiration.fixed-delay-ms:60000}")
+    @Scheduled(fixedDelayString = "${mocou.lifecycle.expiration.fixed-delay-ms}")
     public void run() throws Exception {
         if (!jobRepository.findRunningJobExecutions(JOB_NAME).isEmpty()) {
             return;

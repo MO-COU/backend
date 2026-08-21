@@ -48,16 +48,6 @@ class CouponExpirationTaskletTest {
     }
 
     @Test
-    @DisplayName("만료 배치의 기본 청크 크기는 2,000건이다")
-    void usesTwoThousandAsDefaultChunkSize() {
-        // when
-        CouponExpirationBatchProperties properties = new CouponExpirationBatchProperties();
-
-        // then
-        assertThat(properties.getChunkSize()).isEqualTo(2000);
-    }
-
-    @Test
     @DisplayName("전체 청크가 선택되면 다음 청크를 계속 처리한다")
     void continuesWhenAFullChunkWasSelected() throws Exception {
         // given
