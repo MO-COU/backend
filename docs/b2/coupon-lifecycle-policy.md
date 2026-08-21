@@ -118,7 +118,6 @@ Idempotency-Key: <클라이언트 생성 키>
 - Spring Batch로 1분마다 실행하며, 주기와 청크 크기는 설정값으로 분리한다.
 - 배치 시작 시 DB 시각을 `cutoffAt`으로 한 번 고정한다.
 - 처리 대상은 `ISSUED`이고 `expires_at <= cutoffAt`인 쿠폰이다.
-- 기본 청크 크기는 1,000건이다.
 - 청크 실패 시 해당 청크의 상태와 이력을 함께 롤백한다.
 - 실패한 Job은 동일한 `cutoffAt`으로 재시작한다.
 - 이전 배치가 실행 중이면 새 실행은 건너뛴다.
@@ -126,24 +125,7 @@ Idempotency-Key: <클라이언트 생성 키>
 
 만료 이력의 멱등성 키는 `EXPIRE:{couponIssueId}:{expiresAt}`를 사용한다.
 
-### 실행 설정
-
-| 설정 | 기본값 | 설명 |
-| --- | ---: | --- |
-| `mocou.lifecycle.expiration.fixed-delay-ms` | `60000` | 이전 실행 완료 후 다음 실행까지의 대기 시간(ms) |
-| `mocou.lifecycle.expiration.chunk-size` | `1000` | 하나의 트랜잭션에서 처리할 최대 만료 후보 수 |
-
-스케줄러는 `couponExpirationJob`을 실행한다. 실행 중인 Job이 있으면 해당 주기는 건너뛴다. 가장 최근 실행이 실패했다면 새 `cutoffAt`을 만들지 않고 실패한 Job을 재시작한다.
-
-## 코드와 테스트 위치
-
-- 사용 API·서비스·저장소: `CouponUseController`, `CouponUseService`, `JdbcCouponUseRepository`
-- 만료 전이: `CouponExpirationService`, `JdbcCouponExpirationRepository`
-- 만료 배치: `CouponExpirationBatchConfig`, `CouponExpirationTasklet`, `CouponExpirationScheduler`
-- 단위 테스트: `CouponUseServiceTest`, `CouponExpirationServiceTest`, `CouponExpirationTaskletTest`, `CouponExpirationSchedulerTest`
-- MySQL 통합 테스트: `CouponUseIntegrationTest`, `CouponExpirationIntegrationTest`, `CouponExpirationBatchTest`
-
-전체 테스트는 `./gradlew test`로 실행한다.
+구현 흐름, 실행 설정, 코드·테스트 위치는 [쿠폰 만료 배치 구현·운영 가이드](./coupon-expiration-batch-guide.md)를 참고한다.
 
 ## 테스트 데이터 전제
 

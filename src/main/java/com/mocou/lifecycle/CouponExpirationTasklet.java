@@ -8,6 +8,7 @@ import org.springframework.batch.infrastructure.repeat.RepeatStatus;
 import org.springframework.stereotype.Component;
 
 @Component
+/** 고정된 만료 기준 시각으로 청크 단위 처리를 반복한다. */
 public class CouponExpirationTasklet implements Tasklet {
 
     private final CouponExpirationService service;
