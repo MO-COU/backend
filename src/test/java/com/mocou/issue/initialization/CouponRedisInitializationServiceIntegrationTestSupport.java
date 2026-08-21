@@ -23,20 +23,14 @@ abstract class CouponRedisInitializationServiceIntegrationTestSupport
         extends MySqlContainerTest {
 
     protected static final long COUPON_ID = 1001L;
-    protected static final LocalDateTime OPEN_AT =
-            LocalDateTime.of(2026, 8, 20, 10, 0);
-    protected static final LocalDateTime CLOSE_AT =
-            LocalDateTime.of(2026, 8, 20, 11, 0);
-    protected static final ZoneId COUPON_TIME_ZONE =
-            ZoneId.of("Asia/Seoul");
+    protected static final LocalDateTime OPEN_AT = LocalDateTime.of(2026, 8, 20, 10, 0);
+    protected static final LocalDateTime CLOSE_AT = LocalDateTime.of(2026, 8, 20, 11, 0);
+    protected static final ZoneId COUPON_TIME_ZONE = ZoneId.of("Asia/Seoul");
 
     private static final int REDIS_PORT = 6379;
 
     @Container
-    protected static final GenericContainer<?> REDIS =
-            new GenericContainer<>(
-                    DockerImageName.parse("redis:8.8-alpine"))
-                    .withExposedPorts(REDIS_PORT);
+    protected static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:8.8-alpine")).withExposedPorts(REDIS_PORT);
 
     @Autowired
     protected CouponRedisInitializationService service;
@@ -71,16 +65,14 @@ abstract class CouponRedisInitializationServiceIntegrationTestSupport
                 INSERT INTO coupon (
                     coupon_id,
                     name,
-                    discount_rate,
                     open_at,
                     close_at,
                     status
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 COUPON_ID,
                 "Redis 초기화 통합 테스트 쿠폰",
-                10,
                 OPEN_AT,
                 CLOSE_AT,
                 "READY");

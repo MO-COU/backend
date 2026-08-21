@@ -57,16 +57,14 @@ class CouponRedisInitializationRepositoryIntegrationTest
                 INSERT INTO coupon (
                     coupon_id,
                     name,
-                    discount_rate,
                     open_at,
                     close_at,
                     status
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 COUPON_ID,
                 "Redis 초기화 테스트 쿠폰",
-                10,
                 OPEN_AT,
                 CLOSE_AT,
                 "READY");
