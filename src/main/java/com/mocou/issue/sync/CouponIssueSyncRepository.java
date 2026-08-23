@@ -1,5 +1,6 @@
 package com.mocou.issue.sync;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -30,4 +31,11 @@ public interface CouponIssueSyncRepository {
      * 배치 전체를 안전하게 XACK할 수 있다.
      */
     void saveBatch(long couponId, List<CouponIssueSyncEvent> events);
+
+    /**
+     * 재시도 한도(maxDeliveryCount)를 넘겨 더 이상 재처리하지 않기로 포기한 이벤트를
+     * {@code issue_failure_log}에 남긴다. Redis 재고 보상(compensate)과 짝을 이루는
+     * 호출로, 컨슈머는 이 저장소 호출 전에 이미 보상을 마친 상태다.
+     */
+    void recordFailure(long couponId, long memberId, String failureReason, LocalDateTime occurredAt);
 }

@@ -9,8 +9,12 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.data.domain.Range;
+import org.springframework.data.redis.connection.RedisStreamCommands.XClaimOptions;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
+import org.springframework.data.redis.connection.stream.PendingMessage;
+import org.springframework.data.redis.connection.stream.PendingMessages;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
@@ -19,6 +23,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.mocou.issue.CouponRedisKey;
+import com.mocou.issue.RedisCouponIssueGateway;
 
 import lombok.RequiredArgsConstructor;
 
@@ -47,15 +52,21 @@ public class CouponIssueSyncConsumer {
     // 인스턴스가 하나뿐인 MVP라 고정값 — 여러 인스턴스를 띄우면 인스턴스마다 달라야 함.
     private static final String CONSUMER_NAME = "sync-worker-1";
     private static final ZoneId COUPON_TIME_ZONE = ZoneId.of("Asia/Seoul");
+    // issue_failure_log.failure_reason 중 이 컨슈머가 만들어내는 유일한 사유 — 재시도를
+    // 다 써버린 것 자체가 "복구 불가능한 내부 실패"로 취급된다는 뜻이라 고정값이면 충분하다.
+    private static final String FAILURE_REASON_INTERNAL_ERROR = "INTERNAL_ERROR";
 
     private final StringRedisTemplate redisTemplate;
     private final RedisCouponIssueSyncGateway syncGateway;
+    private final RedisCouponIssueGateway issueGateway;
     private final CouponIssueSyncRepository repository;
     private final CouponIssueSyncProperties properties;
 
     private final StreamBuffer buffer = new StreamBuffer();
     // ensureConsumerGroup을 이미 보장해준 couponId. 매 틱 부르면 낭비라 "바뀔 때만" 확인.
     private Long groupEnsuredForCouponId;
+    // XPENDING을 다시 확인해도 되는 시점. 매 틱마다 하면 낭비라 pendingCheckIntervalMs 간격으로 제한.
+    private Instant nextPendingCheckAt = Instant.EPOCH;
 
     // fixedDelay라 consume()은 절대 자기 자신과 동시에 두 번 안 돈다 — 상태 필드 동시성 걱정 없음.
     @Scheduled(fixedDelayString = "${mocou.issue.sync.poll-interval-ms:10}")
@@ -72,6 +83,7 @@ public class CouponIssueSyncConsumer {
     private void pollOnce(long couponId) {
         String streamKey = CouponRedisKey.issueStream(couponId);
         ensureConsumerGroup(couponId);
+        reclaimStalePendingEntries(streamKey);
 
         int remaining = properties.getChunkSize() - buffer.records.size();
         if (remaining > 0) {
@@ -96,6 +108,112 @@ public class CouponIssueSyncConsumer {
 
         syncGateway.ensureConsumerGroup(couponId);
         groupEnsuredForCouponId = couponId;
+    }
+
+    /**
+     * 오래 미확인 상태인 PEL 엔트리를 처리한다. 컨슈머가 크래시로 재시작됐거나,
+     * XREADGROUP 응답이 유실됐거나(Redis는 이미 PEL에 반영했지만 우리가 못 받은
+     * 경우) 하는 상황을 커버한다.
+     *
+     * <p>{@code totalDeliveryCount}(Redis가 직접 세는 누적 배달 횟수) 기준으로
+     * 둘로 나눈다: {@code maxDeliveryCount} 이하면 아직 가망이 있다고 보고 버퍼에
+     * 합류시켜 3~9번의 일반 배치 로직(파싱→저장→XACK)을 그대로 재사용하고, 이미
+     * 처리된 건은 saveOne의 DuplicateKeyException skip이 걸러준다. 그 이상이면
+     * 포기하고 {@link #reclaimForCompensation}으로 보낸다.
+     */
+    private void reclaimStalePendingEntries(String streamKey) {
+        if (Instant.now().isBefore(nextPendingCheckAt)) {
+            return;
+        }
+        nextPendingCheckAt = Instant.now().plusMillis(properties.getPendingCheckIntervalMs());
+
+        int room = properties.getChunkSize() - buffer.records.size();
+        if (room <= 0) {
+            return;
+        }
+
+        PendingMessages pending = redisTemplate.<String, String>opsForStream()
+                .pending(streamKey, GROUP_NAME, Range.unbounded(), room);
+        if (pending == null || pending.isEmpty()) {
+            return;
+        }
+
+        // pendingMinIdleMs보다 짧게 대기 중인 건 우리 자신의 버퍼가 아직 못
+        // 비운 정상적인 진행 중 항목일 수 있으므로 건드리지 않는다.
+        List<PendingMessage> stale = pending.stream()
+                .filter(message -> message.getElapsedTimeSinceLastDelivery().toMillis()
+                        >= properties.getPendingMinIdleMs())
+                .toList();
+        if (stale.isEmpty()) {
+            return;
+        }
+
+        List<String> retryableIds = stale.stream()
+                .filter(message -> message.getTotalDeliveryCount() <= properties.getMaxDeliveryCount())
+                .map(PendingMessage::getIdAsString)
+                .toList();
+        List<String> exhaustedIds = stale.stream()
+                .filter(message -> message.getTotalDeliveryCount() > properties.getMaxDeliveryCount())
+                .map(PendingMessage::getIdAsString)
+                .toList();
+
+        reclaimForRetry(streamKey, retryableIds);
+        reclaimForCompensation(streamKey, exhaustedIds);
+    }
+
+    /** 아직 재시도 한도 안쪽인 엔트리를 인수해 버퍼에 합류시킨다. */
+    private void reclaimForRetry(String streamKey, List<String> ids) {
+        List<MapRecord<String, String, String>> claimed = claim(streamKey, ids);
+        if (claimed.isEmpty()) {
+            return;
+        }
+
+        if (buffer.records.isEmpty()) {
+            buffer.deadline = Instant.now().plusMillis(properties.getBatchWindowMs());
+        }
+        buffer.records.addAll(claimed);
+    }
+
+    /**
+     * maxDeliveryCount를 넘겨 더 이상 재시도하지 않기로 포기한 엔트리를 처리한다
+     * (Issue #39 체크리스트 10번). 일반 배치(saveBatch)로는 절대 보내지 않고, 대신
+     * Redis 재고를 원복(compensate)한 뒤 issue_failure_log에 남기고 XACK+XDEL로
+     * 스트림에서 제거한다. compensate는 멱등(compensate-coupon.lua의 SREM 가드)이라
+     * 이 메서드 도중 예외가 나 다음 tick에 그대로 재시도돼도 재고를 이중으로
+     * 원복하지 않는다.
+     */
+    private void reclaimForCompensation(String streamKey, List<String> ids) {
+        List<MapRecord<String, String, String>> claimed = claim(streamKey, ids);
+        if (claimed.isEmpty()) {
+            return;
+        }
+
+        for (MapRecord<String, String, String> record : claimed) {
+            CouponIssueSyncEvent event = parse(record);
+            issueGateway.compensate(event.couponId(), event.memberId());
+            repository.recordFailure(
+                    event.couponId(),
+                    event.memberId(),
+                    FAILURE_REASON_INTERNAL_ERROR,
+                    LocalDateTime.now(COUPON_TIME_ZONE));
+        }
+
+        String[] recordIds = claimed.stream()
+                .map(record -> record.getId().getValue())
+                .toArray(String[]::new);
+        acknowledgeAndDelete(streamKey, recordIds);
+    }
+
+    private List<MapRecord<String, String, String>> claim(String streamKey, List<String> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+
+        List<MapRecord<String, String, String>> claimed = redisTemplate.<String, String>opsForStream()
+                .claim(streamKey, GROUP_NAME, CONSUMER_NAME,
+                        XClaimOptions.minIdle(Duration.ofMillis(properties.getPendingMinIdleMs()))
+                                .ids(ids));
+        return claimed == null ? List.of() : claimed;
     }
 
     /** block 시간을 "데드라인까지 남은 시간"으로 매번 재계산해야 데드라인에 정확히 깨어난다. */
@@ -138,10 +256,22 @@ public class CouponIssueSyncConsumer {
         String[] recordIds = buffer.records.stream()
                 .map(record -> record.getId().getValue())
                 .toArray(String[]::new);
-        redisTemplate.<String, String>opsForStream().acknowledge(streamKey, GROUP_NAME, recordIds);
+        acknowledgeAndDelete(streamKey, recordIds);
 
         buffer.records.clear();
         buffer.deadline = null;
+    }
+
+    /**
+     * 이 컨슈머 그룹(coupon-issue-db-sync)이 스트림의 유일한 소비자라, ACK된
+     * 엔트리는 더 이상 아무도 읽지 않는다 — XACK만 하고 남겨두면 스트림이
+     * 무한정 커지므로 XDEL로 바로 지운다(Issue #39 체크리스트 12번). 소비자가
+     * 여러 그룹으로 늘어나면 이 가정이 깨지니 그때는 XTRIM(MINID) 등으로
+     * 바꿔야 한다.
+     */
+    private void acknowledgeAndDelete(String streamKey, String[] recordIds) {
+        redisTemplate.<String, String>opsForStream().acknowledge(streamKey, GROUP_NAME, recordIds);
+        redisTemplate.<String, String>opsForStream().delete(streamKey, recordIds);
     }
 
     private CouponIssueSyncEvent parse(MapRecord<String, String, String> record) {

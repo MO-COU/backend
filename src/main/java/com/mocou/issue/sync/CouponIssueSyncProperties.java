@@ -22,6 +22,22 @@ public class CouponIssueSyncProperties {
     @Min(1)
     private long batchWindowMs = 5_000;
 
+    // batchWindowMs보다 한참 커야 한다 — 로컬 버퍼에서 정상적으로 누적 중인
+    // 엔트리(최대 batchWindowMs 동안 PEL에 안 ACK된 채로 있는 게 정상)를
+    // "죽은 컨슈머가 두고 간 것"으로 착각해 재처리하지 않기 위함.
+    @Min(1)
+    private long pendingMinIdleMs = 30_000;
+
+    // XPENDING 확인도 매 틱마다 하면 낭비라 이 간격으로만 확인한다.
+    @Min(1)
+    private long pendingCheckIntervalMs = 10_000;
+
+    // PendingMessage.totalDeliveryCount(Redis가 직접 세는 누적 배달 횟수)가 이 값을
+    // 넘으면 더 이상 재처리하지 않고 포기(보상+실패 로그)한다 — 별도 재시도
+    // 카운터를 우리가 들고 다닐 필요가 없다.
+    @Min(1)
+    private int maxDeliveryCount = 5;
+
     public int getChunkSize() {
         return chunkSize;
     }
@@ -36,5 +52,29 @@ public class CouponIssueSyncProperties {
 
     public void setBatchWindowMs(long batchWindowMs) {
         this.batchWindowMs = batchWindowMs;
+    }
+
+    public long getPendingMinIdleMs() {
+        return pendingMinIdleMs;
+    }
+
+    public void setPendingMinIdleMs(long pendingMinIdleMs) {
+        this.pendingMinIdleMs = pendingMinIdleMs;
+    }
+
+    public long getPendingCheckIntervalMs() {
+        return pendingCheckIntervalMs;
+    }
+
+    public void setPendingCheckIntervalMs(long pendingCheckIntervalMs) {
+        this.pendingCheckIntervalMs = pendingCheckIntervalMs;
+    }
+
+    public int getMaxDeliveryCount() {
+        return maxDeliveryCount;
+    }
+
+    public void setMaxDeliveryCount(int maxDeliveryCount) {
+        this.maxDeliveryCount = maxDeliveryCount;
     }
 }

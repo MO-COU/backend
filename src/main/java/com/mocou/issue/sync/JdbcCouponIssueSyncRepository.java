@@ -42,6 +42,11 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
             WHERE coupon_id = :couponId
             """;
 
+    private static final String INSERT_ISSUE_FAILURE_LOG = """
+            INSERT INTO issue_failure_log (coupon_id, member_id, failure_reason, occurred_at)
+            VALUES (:couponId, :memberId, :failureReason, :occurredAt)
+            """;
+
     /* coupon-lifecycle-policy.md: expires_at = issued_at + 14일 */
     private static final int EXPIRATION_DAYS = 14;
 
@@ -79,6 +84,16 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
                     .param("couponId", couponId)
                     .update();
         }
+    }
+
+    @Override
+    public void recordFailure(long couponId, long memberId, String failureReason, LocalDateTime occurredAt) {
+        jdbcClient.sql(INSERT_ISSUE_FAILURE_LOG)
+                .param("couponId", couponId)
+                .param("memberId", memberId)
+                .param("failureReason", failureReason)
+                .param("occurredAt", occurredAt)
+                .update();
     }
 
     /** @return 새로 저장했으면 true, 재전달된 중복이라 skip했으면 false */

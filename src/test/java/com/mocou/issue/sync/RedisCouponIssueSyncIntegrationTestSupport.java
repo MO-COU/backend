@@ -12,6 +12,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.mocou.issue.CouponRedisKey;
+import com.mocou.issue.RedisCouponIssueGateway;
 
 @Testcontainers
 abstract class RedisCouponIssueSyncIntegrationTestSupport {
@@ -30,6 +31,7 @@ abstract class RedisCouponIssueSyncIntegrationTestSupport {
     protected static StringRedisTemplate redisTemplate;
 
     protected RedisCouponIssueSyncGateway gateway;
+    protected RedisCouponIssueGateway issueGateway;
 
     @BeforeAll
     protected static void createRedisClient() {
@@ -57,9 +59,26 @@ abstract class RedisCouponIssueSyncIntegrationTestSupport {
         }
 
         gateway = new RedisCouponIssueSyncGateway(redisTemplate);
+        issueGateway = new RedisCouponIssueGateway(redisTemplate);
     }
 
     protected String issueStreamKey() {
         return CouponRedisKey.issueStream(COUPON_ID);
+    }
+
+    protected void setStock(int stock) {
+        redisTemplate.opsForValue().set(stockKey(), Integer.toString(stock));
+    }
+
+    protected String currentStock() {
+        return redisTemplate.opsForValue().get(stockKey());
+    }
+
+    protected String stockKey() {
+        return CouponRedisKey.stock(COUPON_ID);
+    }
+
+    protected String issuedMembersKey() {
+        return CouponRedisKey.issuedMembers(COUPON_ID);
     }
 }
