@@ -1,6 +1,7 @@
 package com.mocou.issue.sync;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -9,6 +10,8 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.mocou.global.exception.ErrorCode;
 
 import lombok.RequiredArgsConstructor;
 
@@ -68,30 +71,32 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
      */
     @Override
     @Transactional
-    public void saveBatch(long couponId, List<CouponIssueSyncEvent> events) {
-        int savedCount = 0;
+    public List<CouponIssueSyncEvent> saveBatch(long couponId, List<CouponIssueSyncEvent> events) {
+        List<CouponIssueSyncEvent> savedEvents = new ArrayList<>();
         for (CouponIssueSyncEvent event : events) {
             if (saveOne(event)) {
-                savedCount++;
+                savedEvents.add(event);
             }
         }
 
         // skip된 건 예전 saveBatch에서 이미 재고를 차감했으므로 카운트에서 제외 —
         // 안 그러면 같은 발급 1건을 두 번 빼는 이중 차감 버그가 된다.
-        if (savedCount > 0) {
+        if (!savedEvents.isEmpty()) {
             jdbcClient.sql(DECREASE_COUPON_STOCK)
-                    .param("count", savedCount)
+                    .param("count", savedEvents.size())
                     .param("couponId", couponId)
                     .update();
         }
+
+        return savedEvents;
     }
 
     @Override
-    public void recordFailure(long couponId, long memberId, String failureReason, LocalDateTime occurredAt) {
+    public void recordFailure(long couponId, long memberId, ErrorCode failureReason, LocalDateTime occurredAt) {
         jdbcClient.sql(INSERT_ISSUE_FAILURE_LOG)
                 .param("couponId", couponId)
                 .param("memberId", memberId)
-                .param("failureReason", failureReason)
+                .param("failureReason", failureReason.name())
                 .param("occurredAt", occurredAt)
                 .update();
     }

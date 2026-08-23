@@ -1,14 +1,5 @@
 package com.mocou.issue.sync;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +18,21 @@ import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 
+import com.mocou.coupon.CouponStatusChangedEvent;
+import com.mocou.global.exception.ErrorCode;
+import com.mocou.notification.NotificationSender;
+import com.mocou.notification.NotificationType;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+
 /**
  * DB 저장({@link CouponIssueSyncRepository})은 mock으로 대체해서, Redis
  * 버퍼링/카운트·시간 기반 flush 트리거만 빠르게 검증한다. 실제 DB 반영/중복
@@ -39,23 +45,31 @@ class CouponIssueSyncConsumerIntegrationTest
     @Mock
     private CouponIssueSyncRepository repository;
 
+    @Mock
+    private NotificationSender notificationSender;
+
     @Test
     @DisplayName("청크 크기만큼 쌓이면 시간 창을 기다리지 않고 즉시 flush한다")
     void flushesImmediatelyWhenChunkSizeReached() {
+        // given
         CouponIssueSyncProperties properties = properties(3, 5_000);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
+                new CouponIssueSyncConsumer(
+                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.initOpenCouponIds();
 
         addEvent("event-1", 100L, 1L);
         addEvent("event-2", 101L, 2L);
         addEvent("event-3", 102L, 3L);
 
+        // when
         consumer.consume();
 
+        // then
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<CouponIssueSyncEvent>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repository).saveBatch(org.mockito.ArgumentMatchers.eq(COUPON_ID), captor.capture());
+        verify(repository).saveBatch(eq(COUPON_ID), captor.capture());
         assertThat(captor.getValue()).hasSize(3);
         assertThat(captor.getValue())
                 .extracting(CouponIssueSyncEvent::memberId)
@@ -64,27 +78,59 @@ class CouponIssueSyncConsumerIntegrationTest
     }
 
     @Test
-    @DisplayName("청크 크기가 안 차도 배치 시간 창이 지나면 flush한다")
-    void flushesWhenBatchWindowElapsesBeforeChunkSizeReached() throws InterruptedException {
-        CouponIssueSyncProperties properties = properties(100, 300);
-        CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
+    @DisplayName("DB 저장에 성공한 이벤트는 회원에게 발급 성공 알림을 보낸다")
+    void notifiesMembersForSuccessfullySavedEvents() {
+        // given
+        CouponIssueSyncProperties properties = properties(2, 5_000);
+        CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
+                redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.initOpenCouponIds();
+        // saveBatch에 넘어온 이벤트가 전부 새로 저장됐다고 가정 — 재전달 skip 케이스는
+        // JdbcCouponIssueSyncRepositoryIntegrationTest가 별도로 검증한다.
+        given(repository.saveBatch(anyLong(), anyList()))
+                .willAnswer(invocation -> invocation.getArgument(1));
 
         addEvent("event-1", 100L, 1L);
         addEvent("event-2", 101L, 2L);
 
+        // when
+        consumer.consume();
+
+        // then
+        verify(notificationSender).notifyMember(NotificationType.ISSUE_SUCCESS, COUPON_ID, 100L);
+        verify(notificationSender).notifyMember(NotificationType.ISSUE_SUCCESS, COUPON_ID, 101L);
+    }
+
+    @Test
+    @DisplayName("청크 크기가 안 차도 배치 시간 창이 지나면 flush한다")
+    void flushesWhenBatchWindowElapsesBeforeChunkSizeReached() throws InterruptedException {
+        // given
+        CouponIssueSyncProperties properties = properties(100, 300);
+        CouponIssueSyncConsumer consumer =
+                new CouponIssueSyncConsumer(
+                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+        given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.initOpenCouponIds();
+
+        addEvent("event-1", 100L, 1L);
+        addEvent("event-2", 101L, 2L);
+
+        // when
         // 청크 크기(100건)에 한참 못 미치는 2건만 있는 시점 — 아직 flush되면 안 된다.
         consumer.consume();
-        verify(repository, never()).saveBatch(anyLong(), org.mockito.ArgumentMatchers.anyList());
 
+        // then
+        verify(repository, never()).saveBatch(anyLong(), anyList());
+
+        // when
         Thread.sleep(350);
         consumer.consume();
 
+        // then
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<CouponIssueSyncEvent>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repository, times(1))
-                .saveBatch(org.mockito.ArgumentMatchers.eq(COUPON_ID), captor.capture());
+        verify(repository, times(1)).saveBatch(eq(COUPON_ID), captor.capture());
         assertThat(captor.getValue()).hasSize(2);
         assertThat(pendingCount()).isZero();
     }
@@ -92,12 +138,15 @@ class CouponIssueSyncConsumerIntegrationTest
     @Test
     @DisplayName("다른 컨슈머가 읽고 ACK 못 한 채 오래 방치된 엔트리를 인수해 처리한다")
     void reclaimsStalePendingEntryFromCrashedConsumer() {
+        // given
         CouponIssueSyncProperties properties = properties(1, 5_000);
         properties.setPendingMinIdleMs(100);
         properties.setPendingCheckIntervalMs(0);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
+                new CouponIssueSyncConsumer(
+                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.initOpenCouponIds();
 
         gateway.ensureConsumerGroup(COUPON_ID);
         addEvent("event-1", 100L, 1L);
@@ -111,11 +160,13 @@ class CouponIssueSyncConsumerIntegrationTest
 
         awaitPendingMinIdle();
 
+        // when
         consumer.consume();
 
+        // then
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<CouponIssueSyncEvent>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repository).saveBatch(org.mockito.ArgumentMatchers.eq(COUPON_ID), captor.capture());
+        verify(repository).saveBatch(eq(COUPON_ID), captor.capture());
         assertThat(captor.getValue()).hasSize(1);
         assertThat(captor.getValue().getFirst().memberId()).isEqualTo(100L);
         assertThat(pendingCount()).isZero();
@@ -124,13 +175,16 @@ class CouponIssueSyncConsumerIntegrationTest
     @Test
     @DisplayName("재시도 한도를 초과한 엔트리는 재처리 대신 보상하고 실패 로그를 남긴 뒤 XACK한다")
     void compensatesAndLogsFailureWhenRetryLimitExceeded() {
+        // given
         CouponIssueSyncProperties properties = properties(100, 5_000);
         properties.setPendingMinIdleMs(100);
         properties.setPendingCheckIntervalMs(0);
         properties.setMaxDeliveryCount(3);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
+                new CouponIssueSyncConsumer(
+                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.initOpenCouponIds();
 
         gateway.ensureConsumerGroup(COUPON_ID);
         // reserveAndAppendEvent가 실제로 남기는 상태(재고 차감 + 발급 회원 등록)를
@@ -154,10 +208,13 @@ class CouponIssueSyncConsumerIntegrationTest
 
         awaitPendingMinIdle();
 
+        // when
         consumer.consume();
 
-        verify(repository, never()).saveBatch(anyLong(), org.mockito.ArgumentMatchers.anyList());
-        verify(repository).recordFailure(eq(COUPON_ID), eq(100L), eq("INTERNAL_ERROR"), any());
+        // then
+        verify(repository, never()).saveBatch(anyLong(), anyList());
+        verify(repository).recordFailure(eq(COUPON_ID), eq(100L), eq(ErrorCode.INTERNAL_ERROR), any());
+        verify(notificationSender, never()).notifyMember(any(), anyLong(), anyLong());
         assertThat(currentStock()).isEqualTo("6");
         assertThat(redisTemplate.opsForSet().isMember(issuedMembersKey(), "100")).isFalse();
         assertThat(pendingCount()).isZero();
@@ -167,17 +224,68 @@ class CouponIssueSyncConsumerIntegrationTest
     @Test
     @DisplayName("정상 flush 후에는 XACK된 엔트리를 스트림에서도 삭제한다")
     void deletesStreamEntriesAfterFlush() {
+        // given
         CouponIssueSyncProperties properties = properties(1, 5_000);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
+                new CouponIssueSyncConsumer(
+                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.initOpenCouponIds();
 
         addEvent("event-1", 100L, 1L);
 
+        // when
         consumer.consume();
 
+        // then
         assertThat(pendingCount()).isZero();
         assertThat(redisTemplate.opsForStream().size(issueStreamKey())).isZero();
+    }
+
+    @Test
+    @DisplayName("consume()를 여러 번 호출해도 open 쿠폰 목록은 최초 1번만 DB에서 조회한다")
+    void queriesOpenCouponIdsOnlyOnceAcrossMultipleConsumeCalls() {
+        // given
+        CouponIssueSyncProperties properties = properties(100, 5_000);
+        CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
+                redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+        given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.initOpenCouponIds();
+
+        // when
+        // 10ms 간격으로 반복 호출되는 실제 상황을 재현 — 매번 DB를 조회하면 안 된다.
+        consumer.consume();
+        consumer.consume();
+        consumer.consume();
+
+        // then
+        verify(repository, times(1)).findOpenCouponIds();
+    }
+
+    @Test
+    @DisplayName("CouponStatusChangedEvent를 받으면 open 쿠폰 목록을 다시 조회해 반영한다")
+    void refreshesOpenCouponIdsOnStatusChangedEvent() {
+        // given
+        CouponIssueSyncProperties properties = properties(1, 5_000);
+        CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
+                redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+        given(repository.findOpenCouponIds()).willReturn(List.of());
+        consumer.initOpenCouponIds();
+        given(repository.saveBatch(anyLong(), anyList()))
+                .willAnswer(invocation -> invocation.getArgument(1));
+
+        addEvent("event-1", 100L, 1L);
+        consumer.consume();
+        verify(repository, never()).saveBatch(anyLong(), anyList());
+
+        // when
+        // 관리자 API가 쿠폰을 OPEN으로 바꾸고 이벤트를 발행했다고 가정한다.
+        given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.onCouponStatusChanged(new CouponStatusChangedEvent(COUPON_ID));
+        consumer.consume();
+
+        // then
+        verify(repository).saveBatch(eq(COUPON_ID), anyList());
     }
 
     private void awaitPendingMinIdle() {

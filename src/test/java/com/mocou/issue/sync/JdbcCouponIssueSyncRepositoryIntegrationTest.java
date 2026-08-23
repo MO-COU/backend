@@ -1,7 +1,5 @@
 package com.mocou.issue.sync;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -12,6 +10,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.connection.stream.RecordId;
 
 import com.mocou.support.MySqlContainerTest;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(properties = "spring.batch.jdbc.initialize-schema=never")
 class JdbcCouponIssueSyncRepositoryIntegrationTest
@@ -32,6 +32,7 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
     @Test
     @DisplayName("OPEN 상태 쿠폰의 coupon_id만 조회한다")
     void findsOnlyOpenCouponIds() {
+        // given
         // OPEN 2건 + 나머지 상태(READY/CLOSED/SOLD_OUT) 3건을 함께 넣어서,
         // WHERE status = 'OPEN' 조건이 다른 상태를 실제로 걸러내는지까지 검증한다.
         insertCoupon(1001L, "OPEN");
@@ -40,35 +41,50 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         insertCoupon(1004L, "CLOSED");
         insertCoupon(1005L, "SOLD_OUT");
 
+        // when
         List<Long> result = repository.findOpenCouponIds();
 
+        // then
         assertThat(result).containsExactlyInAnyOrder(1001L, 1002L);
     }
 
     @Test
     @DisplayName("OPEN 상태 쿠폰이 없으면 빈 목록을 반환한다")
     void returnsEmptyListWhenNoCouponIsOpen() {
-        // 컨슈머가 매 실행마다 이 목록을 순회하므로, 결과가 없을 때 null이
-        // 아니라 빈 리스트여야 호출부에서 별도 null 체크 없이 순회할 수 있다.
+        // given
         insertCoupon(1001L, "READY");
 
-        assertThat(repository.findOpenCouponIds()).isEmpty();
+        // when
+        List<Long> result = repository.findOpenCouponIds();
+
+        // then
+        // 컨슈머가 매 실행마다 이 목록을 순회하므로, 결과가 없을 때 null이
+        // 아니라 빈 리스트여야 호출부에서 별도 null 체크 없이 순회할 수 있다.
+        assertThat(result).isEmpty();
     }
 
     @Test
     @DisplayName("새 이벤트를 coupon_issue/coupon_issue_history에 저장하고 재고를 차감한다")
     void savesNewEventsAndDecreasesStock() {
+        // given
         insertCoupon(COUPON_ID, "OPEN");
         insertCouponStock(COUPON_ID, 100);
         insertMember(MEMBER_ID_1);
         insertMember(MEMBER_ID_2);
 
-        repository.saveBatch(
+        // when
+        List<CouponIssueSyncEvent> savedEvents = repository.saveBatch(
                 COUPON_ID,
                 List.of(
                         syncEvent(MEMBER_ID_1, "event-1"),
                         syncEvent(MEMBER_ID_2, "event-2")));
 
+        // then
+        // 반환값은 알림 발송 대상을 결정하는 데 쓰이므로(CouponIssueSyncConsumer),
+        // 새로 저장된 이벤트가 빠짐없이 담겨오는지 확인한다.
+        assertThat(savedEvents)
+                .extracting(CouponIssueSyncEvent::memberId)
+                .containsExactlyInAnyOrder(MEMBER_ID_1, MEMBER_ID_2);
         assertThat(issueCount(COUPON_ID)).isEqualTo(2);
         // expires_at = issued_at + 14일(coupon-lifecycle-policy.md) 그대로 저장됐는지 확인
         assertThat(expiresAtOf(COUPON_ID, MEMBER_ID_1)).isEqualTo(ISSUED_AT.plusDays(14));
@@ -79,6 +95,7 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
     @Test
     @DisplayName("이미 처리된(coupon_id, member_id) 이벤트는 건너뛰고 나머지만 저장한다")
     void skipsAlreadyProcessedEventOnRedelivery() {
+        // given
         insertCoupon(COUPON_ID, "OPEN");
         insertCouponStock(COUPON_ID, 100);
         insertMember(MEMBER_ID_1);
@@ -86,13 +103,20 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         // 이전 실행에서 이미 반영된 것처럼 member 1건을 미리 저장해 재전달 상황을 재현한다.
         repository.saveBatch(COUPON_ID, List.of(syncEvent(MEMBER_ID_1, "event-1")));
 
+        // when
         // 재전달: member 1(이미 처리됨) + member 2(새 이벤트)가 같은 배치로 다시 들어옴
-        repository.saveBatch(
+        List<CouponIssueSyncEvent> savedEvents = repository.saveBatch(
                 COUPON_ID,
                 List.of(
                         syncEvent(MEMBER_ID_1, "event-1-redelivered"),
                         syncEvent(MEMBER_ID_2, "event-2")));
 
+        // then
+        // skip된 member 1은 반환값에서 빠져야 한다 — 안 그러면 이미 발급 성공 알림을
+        // 받은 회원에게 재전달마다 알림이 중복으로 나간다.
+        assertThat(savedEvents)
+                .extracting(CouponIssueSyncEvent::memberId)
+                .containsExactly(MEMBER_ID_2);
         assertThat(issueCount(COUPON_ID)).isEqualTo(2);
         // 중복 건 때문에 history가 2건으로 늘어나지 않고 최초 1건만 유지되는지 확인
         assertThat(issuedHistoryCount(COUPON_ID, MEMBER_ID_1)).isEqualTo(1);

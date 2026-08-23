@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.RedisStreamCommands.XClaimOptions;
 import org.springframework.data.redis.connection.stream.Consumer;
@@ -22,9 +23,14 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.mocou.coupon.CouponStatusChangedEvent;
+import com.mocou.global.exception.ErrorCode;
 import com.mocou.issue.CouponRedisKey;
 import com.mocou.issue.RedisCouponIssueGateway;
+import com.mocou.notification.NotificationSender;
+import com.mocou.notification.NotificationType;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -52,14 +58,12 @@ public class CouponIssueSyncConsumer {
     // 인스턴스가 하나뿐인 MVP라 고정값 — 여러 인스턴스를 띄우면 인스턴스마다 달라야 함.
     private static final String CONSUMER_NAME = "sync-worker-1";
     private static final ZoneId COUPON_TIME_ZONE = ZoneId.of("Asia/Seoul");
-    // issue_failure_log.failure_reason 중 이 컨슈머가 만들어내는 유일한 사유 — 재시도를
-    // 다 써버린 것 자체가 "복구 불가능한 내부 실패"로 취급된다는 뜻이라 고정값이면 충분하다.
-    private static final String FAILURE_REASON_INTERNAL_ERROR = "INTERNAL_ERROR";
 
     private final StringRedisTemplate redisTemplate;
     private final RedisCouponIssueSyncGateway syncGateway;
     private final RedisCouponIssueGateway issueGateway;
     private final CouponIssueSyncRepository repository;
+    private final NotificationSender notificationSender;
     private final CouponIssueSyncProperties properties;
 
     private final StreamBuffer buffer = new StreamBuffer();
@@ -67,16 +71,37 @@ public class CouponIssueSyncConsumer {
     private Long groupEnsuredForCouponId;
     // XPENDING을 다시 확인해도 되는 시점. 매 틱마다 하면 낭비라 pendingCheckIntervalMs 간격으로 제한.
     private Instant nextPendingCheckAt = Instant.EPOCH;
+    // 매 틱(10ms)마다 DB를 조회하면 그 자체가 병목이라, 시작 시 한 번만 채우고 이후는
+    // CouponStatusChangedEvent(관리자 API가 상태를 바꿀 때 발행)를 받을 때만 갱신한다.
+    // @Scheduled 스레드와 이벤트를 발행하는 쪽(관리자 API 요청 스레드)이 다를 수 있어
+    // volatile로 가시성을 보장한다 — 참조를 통째로 교체만 하니 이 정도로 충분하다.
+    private volatile List<Long> openCouponIds = List.of();
+
+    /** 빈이 뜰 때 한 번만 DB를 조회해 캐시를 채운다 — "최초 실행 시 한 번만" 조회. */
+    @PostConstruct
+    void initOpenCouponIds() {
+        refreshOpenCouponIds();
+    }
+
+    /** 관리자 API 등이 coupon.status를 바꾸고 발행하는 이벤트를 받아 캐시를 다시 채운다. */
+    @EventListener
+    void onCouponStatusChanged(CouponStatusChangedEvent event) {
+        refreshOpenCouponIds();
+    }
+
+    private void refreshOpenCouponIds() {
+        openCouponIds = repository.findOpenCouponIds();
+    }
 
     // fixedDelay라 consume()은 절대 자기 자신과 동시에 두 번 안 돈다 — 상태 필드 동시성 걱정 없음.
     @Scheduled(fixedDelayString = "${mocou.issue.sync.poll-interval-ms:10}")
     public void consume() {
-        List<Long> openCouponIds = repository.findOpenCouponIds();
-        if (openCouponIds.isEmpty()) {
+        List<Long> couponIds = openCouponIds;
+        if (couponIds.isEmpty()) {
             return;
         }
 
-        pollOnce(openCouponIds.getFirst());
+        pollOnce(couponIds.getFirst());
     }
 
     /** 배치를 완성하는 게 아니라 "한 스텝 진행"시킨다 — 조건이 찰 때까지 여러 번 불린다. */
@@ -194,7 +219,7 @@ public class CouponIssueSyncConsumer {
             repository.recordFailure(
                     event.couponId(),
                     event.memberId(),
-                    FAILURE_REASON_INTERNAL_ERROR,
+                    ErrorCode.INTERNAL_ERROR,
                     LocalDateTime.now(COUPON_TIME_ZONE));
         }
 
@@ -251,7 +276,8 @@ public class CouponIssueSyncConsumer {
         // saveBatch가 커밋까지 끝난 뒤에만 XACK한다 — 순서가 바뀌면 "ACK는 됐는데
         // 크래시로 DB엔 없는" 영구 유실이 생긴다. 여기서 예외를 안 잡는 이유도 같다:
         // 실패하면 버퍼/PEL이 그대로 남아 다음 tick에 재시도된다.
-        repository.saveBatch(couponId, events);
+        List<CouponIssueSyncEvent> savedEvents = repository.saveBatch(couponId, events);
+        notifyIssueSuccess(savedEvents);
 
         String[] recordIds = buffer.records.stream()
                 .map(record -> record.getId().getValue())
@@ -260,6 +286,17 @@ public class CouponIssueSyncConsumer {
 
         buffer.records.clear();
         buffer.deadline = null;
+    }
+
+    /**
+     * saveBatch가 커밋까지 끝낸(=실제로 새로 저장된) 이벤트에 대해서만 발급 성공
+     * 알림을 보낸다. 재전달돼 skip된 이벤트는 savedEvents에 없으므로 중복 알림이
+     * 안 나간다.
+     */
+    private void notifyIssueSuccess(List<CouponIssueSyncEvent> savedEvents) {
+        for (CouponIssueSyncEvent event : savedEvents) {
+            notificationSender.notifyMember(NotificationType.ISSUE_SUCCESS, event.couponId(), event.memberId());
+        }
     }
 
     /**
