@@ -281,7 +281,13 @@ HAVING s.total_quantity <> s.remaining_quantity + issued;
 
 이 쿼리들은 눈으로 확인하는 수단이며, 정식 검증 도구가 아니다.
 
-규칙 기반 검증은 `com.mocou.consistency`(B1 담당)가 맡는다. **판정식은 [정합성 검증 규칙 명세](./consistency-rules.md)에 확정돼 있고 구현은 예정 상태다.** 구현 전까지 정합성 확인은 위 쿼리와 명세의 판정식을 직접 실행하는 방법뿐이다.
+규칙 기반 검증은 `com.mocou.consistency`(B1 담당)가 맡는다. 판정식은 [정합성 검증 규칙 명세](./consistency-rules.md)에 있고, 실행은 아래 한 줄로 한다.
+
+```bash
+curl -X POST 'http://localhost:8080/api/admin/verifications'
+```
+
+결과 조회와 진행 중 판별은 명세의 [2.3 실행 방법](./consistency-rules.md)을 본다.
 
 ```text
 기본 설정에서는 시연용 쿠폰 ID가 `301`이다. Redis 초기화 결과는 다음 명령으로 확인한다.
