@@ -14,26 +14,75 @@ class RuleOutcomeTest {
             Violation.of(ViolationTarget.COUPON, 1L, "총재고 10000, 발급 10001");
 
     @Test
-    @DisplayName("위반이 없으면 통과로 판정한다")
-    void passesWhenNoViolation() {
+    @DisplayName("검사를 마친 결과는 상태가 CHECKED다")
+    void checkedOutcomeKeepsStatus() {
         // when
         RuleOutcome outcome = RuleOutcome.passed(VerificationRule.OVER_ISSUE, 301);
 
         // then
-        assertThat(outcome.passed()).isTrue();
+        assertThat(outcome.status()).isEqualTo(RuleStatus.CHECKED);
+        assertThat(outcome.violationCount()).isZero();
         assertThat(outcome.truncated()).isFalse();
         assertThat(outcome.violations()).isEmpty();
     }
 
     @Test
-    @DisplayName("위반이 한 건이라도 있으면 통과가 아니다")
-    void failsWhenAnyViolation() {
+    @DisplayName("위반을 찾은 결과는 건수와 표본을 함께 갖는다")
+    void violatedOutcomeKeepsCountAndSamples() {
         // when
         RuleOutcome outcome =
-                new RuleOutcome(VerificationRule.OVER_ISSUE, 301, 1, List.of(SAMPLE));
+                RuleOutcome.violated(VerificationRule.OVER_ISSUE, 301, 1, List.of(SAMPLE));
 
         // then
-        assertThat(outcome.passed()).isFalse();
+        assertThat(outcome.status()).isEqualTo(RuleStatus.CHECKED);
+        assertThat(outcome.violationCount()).isEqualTo(1);
+        assertThat(outcome.violations()).containsExactly(SAMPLE);
+    }
+
+    @Test
+    @DisplayName("실행에 실패한 결과는 사유를 남긴다")
+    void failedOutcomeKeepsReason() {
+        // when
+        RuleOutcome outcome =
+                RuleOutcome.failed(VerificationRule.HISTORY_MISMATCH, "Lock wait timeout exceeded");
+
+        // then
+        assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
+        assertThat(outcome.violationCount()).isZero();
+        assertThat(outcome.failureReason()).contains("Lock wait timeout");
+    }
+
+    /**
+     * 데이터가 비어 검사 대상이 없는 정상 실행과 실패는 건수가 똑같이 0이다. 상태를 보지 않으면 규칙이 통째로 깨진 실행이 정상으로 보인다.
+     */
+    @Test
+    @DisplayName("검사 대상이 0건인 정상 실행과 실패는 건수로 구분되지 않는다")
+    void emptyTargetAndFailureShareTheSameCounts() {
+        // when
+        RuleOutcome empty = RuleOutcome.passed(VerificationRule.OVER_ISSUE, 0);
+        RuleOutcome broken = RuleOutcome.failed(VerificationRule.OVER_ISSUE, "Unknown column");
+
+        // then
+        assertThat(empty.checkedCount()).isEqualTo(broken.checkedCount());
+        assertThat(empty.violationCount()).isEqualTo(broken.violationCount());
+        assertThat(empty.status()).isNotEqualTo(broken.status());
+    }
+
+    @Test
+    @DisplayName("실패한 규칙에 사유가 없으면 거부한다")
+    void refusesFailureWithoutReason() {
+        // when, then
+        assertThatThrownBy(
+                        () ->
+                                new RuleOutcome(
+                                        VerificationRule.OVER_ISSUE,
+                                        RuleStatus.FAILED,
+                                        0,
+                                        0,
+                                        List.of(),
+                                        " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("사유");
     }
 
     /** 대량 위반은 상한까지만 저장하므로 전체 건수와 표본 크기가 갈린다. */
@@ -42,7 +91,8 @@ class RuleOutcomeTest {
     void marksTruncatedWhenSampleIsSmallerThanTotal() {
         // when
         RuleOutcome outcome =
-                new RuleOutcome(VerificationRule.STATE_TIMESTAMP_MISMATCH, 3_000_000, 5_000, List.of(SAMPLE));
+                RuleOutcome.violated(
+                        VerificationRule.STATE_TIMESTAMP_MISMATCH, 3_000_000, 5_000, List.of(SAMPLE));
 
         // then
         assertThat(outcome.truncated()).isTrue();
@@ -55,7 +105,8 @@ class RuleOutcomeTest {
     @DisplayName("표본이 전체 위반 수보다 많으면 거부한다")
     void refusesWhenSampleExceedsTotal() {
         // when, then
-        assertThatThrownBy(() -> new RuleOutcome(VerificationRule.OVER_ISSUE, 301, 0, List.of(SAMPLE)))
+        assertThatThrownBy(
+                        () -> RuleOutcome.violated(VerificationRule.OVER_ISSUE, 301, 0, List.of(SAMPLE)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("표본");
     }
@@ -64,7 +115,15 @@ class RuleOutcomeTest {
     @DisplayName("검사 건수가 음수면 거부한다")
     void refusesNegativeCounts() {
         // when, then
-        assertThatThrownBy(() -> new RuleOutcome(VerificationRule.OVER_ISSUE, -1, 0, List.of()))
+        assertThatThrownBy(
+                        () ->
+                                new RuleOutcome(
+                                        VerificationRule.OVER_ISSUE,
+                                        RuleStatus.CHECKED,
+                                        -1,
+                                        0,
+                                        List.of(),
+                                        null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("음수");
     }
@@ -74,7 +133,7 @@ class RuleOutcomeTest {
     void keepsViolationsImmutable() {
         // given
         List<Violation> mutable = new ArrayList<>(List.of(SAMPLE));
-        RuleOutcome outcome = new RuleOutcome(VerificationRule.OVER_ISSUE, 301, 1, mutable);
+        RuleOutcome outcome = RuleOutcome.violated(VerificationRule.OVER_ISSUE, 301, 1, mutable);
 
         // when
         mutable.clear();

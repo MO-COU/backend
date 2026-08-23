@@ -49,7 +49,7 @@
 
 `rule_name`은 `verification_rule_result.rule_name`에 그대로 들어가는 상수다.
 
-`checked_count`는 검사 대상 수, `violation_count`는 위반 수다. **`checked_count = 0`은 통과가 아니라 미검사 신호다.**
+`checked_count`는 검사 대상 수, `violation_count`는 위반 수다. **규칙이 실행에 실패하면 둘 다 0이 되는데, 검사 대상이 없어 0인 정상 실행과 값이 같다.** 둘을 구분하는 실행 상태는 따로 기록한다.
 
 ### R1. `DUPLICATE_ISSUE` — 중복 발급
 
@@ -306,11 +306,16 @@ DB 제약이 막는 규칙은 제약을 우회해 주입해야 하는데, 우회
 ## 4. 판정
 
 ```
-규칙 중 하나라도 violation_count > 0  →  verdict = FAIL
-전부 0                                →  verdict = PASS
+규칙 중 하나라도 실행 실패  →  verdict = ERROR   (이 실행은 신뢰할 수 없다)
+위반이 하나라도 있음        →  verdict = FAIL
+전부 검사 완료, 위반 0건    →  verdict = PASS
 ```
 
-`checked_count = 0`인 규칙이 있으면 그 규칙은 검사되지 않은 것이다. 판정 자체는 위 기준을 따르되, 리포트에서는 통과와 구분해 표시한다.
+`ERROR`는 위반이 없다는 뜻이 아니라 **판정을 내릴 수 없다**는 뜻이다. 규칙 하나가 죽으면 그 실행의 "불일치 0건"은 주장으로 성립하지 않는다.
+
+실패한 규칙은 `verification_rule_result`에 실행 상태와 사유를 함께 남긴다. 남기지 않으면 `checked_count = 0, violation_count = 0`이 되어, 검사 대상이 없어 0인 정상 실행과 구분되지 않는다.
+
+**실행에 실패한 규칙은 위반 수가 0이지만 통과가 아니다.** 판정에서 통과로 세지 않고, 리포트에도 구분해 표시한다. 규칙 하나가 실패해도 나머지는 계속 실행한다.
 
 ---
 
