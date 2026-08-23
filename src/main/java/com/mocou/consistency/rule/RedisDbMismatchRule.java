@@ -85,7 +85,9 @@ class RedisDbMismatchRule implements ConsistencyRule {
                             jdbcTemplate.queryForList(
                                     ISSUED_MEMBER_SQL, Map.of("couponId", couponId), Long.class));
 
-            checkedCount += redisMembers.size() + dbMembers.size();
+            // 회원 대조 건수에 재고 대조 1건을 더한다. 발급 회원이 하나도 없어도 재고는 대조하므로,
+            // 빼면 재고만 어긋났을 때 "검사 0건인데 위반 1건"이라는 앞뒤가 안 맞는 결과가 남는다.
+            checkedCount += redisMembers.size() + dbMembers.size() + 1;
 
             violationCount +=
                     collectMemberGaps(couponId, redisMembers, dbMembers, context, violations);

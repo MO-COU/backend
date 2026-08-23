@@ -43,13 +43,33 @@
 
 같은 쿠폰에 대한 발급 실행과 검증 실행은 모두 여러 번 기록할 수 있다.
 
+### 2.3 실행 방법
+
+```bash
+curl -X POST 'http://localhost:8080/api/admin/verifications'
+```
+
+부하 테스트 직후 검증이면 `?issueRunId=<번호>`를 붙인다.
+
+`202 Accepted`와 `runId`가 즉시 돌아오고 검증은 뒤에서 계속된다. 결과는 그 번호로 조회한다.
+
+```sql
+SELECT verdict, started_at, finished_at FROM verification_run WHERE run_id = ?;
+SELECT rule_name, status, checked_count, violation_count, failure_reason
+FROM verification_rule_result WHERE run_id = ?;
+```
+
+`finished_at`이 `NULL`이면 아직 도는 중이다. **진행 중에 다시 요청하면 `409 VERIFICATION_ALREADY_RUNNING`이 나온다.** 겹쳐 돌리면 결과 행이 둘로 갈린다. 단, 시작한 지 5분(`mocou.consistency.stale-run-minutes`)이 지나도 안 끝난 실행은 죽은 것으로 보고 새 실행을 허용한다.
+
 ---
 
 ## 3. 규칙
 
 `rule_name`은 `verification_rule_result.rule_name`에 그대로 들어가는 상수다.
 
-`checked_count`는 검사 대상 수, `violation_count`는 위반 수다. **규칙이 실행에 실패하면 둘 다 0이 되는데, 검사 대상이 없어 0인 정상 실행과 값이 같다.** 둘을 구분하는 실행 상태는 따로 기록한다.
+`checked_count`는 그 규칙이 실제로 대조한 항목의 수, `violation_count`는 그중 어긋난 수다. 규칙마다 세는 단위가 다르므로 규칙별 표에 명시한다.
+
+**규칙이 실행에 실패하면 둘 다 0이 되는데, 검사 대상이 없어 0인 정상 실행과 값이 같다.** 그래서 `verification_rule_result.status`에 `CHECKED`(끝까지 실행됨) / `FAILED`(실행하지 못함)를 따로 남기고, `FAILED`면 `failure_reason`에 사유를 적는다.
 
 ### R1. `DUPLICATE_ISSUE` — 중복 발급
 
@@ -301,6 +321,41 @@ DB 제약이 막는 규칙은 제약을 우회해 주입해야 하는데, 우회
 
 `SET FOREIGN_KEY_CHECKS = 0`은 FK만 우회하고 유니크 인덱스는 우회하지 못한다.
 
+### R8. `REDIS_DB_MISMATCH` — Redis·DB 교차 정합성
+
+Redis가 확정한 발급 결과와 DB 이력이 같은가.
+
+검사 대상은 `coupon.status = 'OPEN'`인 쿠폰뿐이다. Redis 키는 발급을 여는 쿠폰에만 만들어지므로, 지난 회차까지 포함하면 "키가 없다"가 전부 위반으로 잡힌다.
+
+**선행 조건 — 동기화가 끝나야 판정할 수 있다.** 발급은 Redis에서 확정되고 DB 반영은 Stream 컨슈머가 뒤따르므로, 발급이 진행 중인 동안에는 차이가 있는 것이 정상이다. 아래 둘 중 하나라도 남아 있으면 위반 0건이 아니라 **실행 실패(판정 불가)** 로 기록한다.
+
+| 확인 | 방법 |
+| --- | --- |
+| 아직 DB로 안 넘어간 발급 | `XLEN coupon:{id}:issue-stream` > 0 |
+| 컨슈머가 처리 중인 발급 | `XPENDING`의 미확인 건수 > 0 |
+
+컨슈머가 DB 커밋 뒤 `XACK`과 `XDEL`을 함께 하므로, 둘 다 0이면 처리가 끝난 것이다. 사람에게 "부하 테스트 끝났나요"라고 묻지 않고 스트림에서 직접 확인한다.
+
+**위반 판정 — 쿠폰마다 두 가지를 본다.**
+
+| 코드 | 조건 | 뜻 |
+| --- | --- | --- |
+| `ISSUED_ONLY_IN_REDIS` | Redis 발급 집합 − DB 발급 회원 | DB 적재가 유실됐다 |
+| `ISSUED_ONLY_IN_DB` | DB 발급 회원 − Redis 발급 집합 | 발급하지 않은 회원의 이력이 있다 |
+| `STOCK_COUNT_MISMATCH` | Redis 재고 ≠ `coupon_stock.remaining_quantity` | 재고가 어긋났다 |
+
+동기화가 끝난 상태를 전제하므로 **양방향 모두 위반이다.** 한쪽만 보면 유실 방향을 놓친다.
+
+**Redis 키가 아예 없는 것도 `STOCK_COUNT_MISMATCH`다.** 쿠폰이 `OPEN`인데 재고 키가 없으면 발급 요청이 전건 거부되므로, DB는 열려 있다는데 실제로는 아무도 받을 수 없는 상태다. 초기화를 안 했거나 키가 유실된 것이며 둘 다 위반이다.
+
+| 항목 | 값 |
+| --- | --- |
+| `checked_count` | 쿠폰별 (Redis 발급 회원 수 + DB 발급 회원 수 + 재고 대조 1) 의 합 |
+| `target_type` | `COUPON_MEMBER_PAIR`(회원 차집합) / `COUPON`(재고) |
+| `detail` | 코드와 함께 어긋난 값 |
+
+위반 상세는 회원 번호 오름차순으로 담는다. 상한(5절)에 걸려 잘려도 매번 같은 표본이 남아야 재현성이 유지된다.
+
 ---
 
 ## 4. 판정
@@ -313,7 +368,7 @@ DB 제약이 막는 규칙은 제약을 우회해 주입해야 하는데, 우회
 
 `ERROR`는 위반이 없다는 뜻이 아니라 **판정을 내릴 수 없다**는 뜻이다. 규칙 하나가 죽으면 그 실행의 "불일치 0건"은 주장으로 성립하지 않는다.
 
-실패한 규칙은 `verification_rule_result`에 실행 상태와 사유를 함께 남긴다. 남기지 않으면 `checked_count = 0, violation_count = 0`이 되어, 검사 대상이 없어 0인 정상 실행과 구분되지 않는다.
+실패한 규칙은 `verification_rule_result.status = 'FAILED'`와 `failure_reason`으로 남긴다. 남기지 않으면 `checked_count = 0, violation_count = 0`이 되어, 검사 대상이 없어 0인 정상 실행과 구분되지 않는다.
 
 **실행에 실패한 규칙은 위반 수가 0이지만 통과가 아니다.** 판정에서 통과로 세지 않고, 리포트에도 구분해 표시한다. 규칙 하나가 실패해도 나머지는 계속 실행한다.
 
@@ -333,26 +388,11 @@ DB 제약이 막는 규칙은 제약을 우회해 주입해야 하는데, 우회
 
 ---
 
-## 6. 보류: `REDIS_DB_MISMATCH`
-
-Redis 발급 집합과 DB 이력의 양방향 차집합을 본다. **A팀 키 스펙이 확정되어야 착수할 수 있어 이번 명세에서는 판정식을 정하지 않는다.**
-
-필요한 것:
-
-| 항목 | 왜 |
-| --- | --- |
-| 발급 회원 집합 키 패턴·자료구조 | 차집합 대상을 특정하기 위해 |
-| 재고 카운터 키 패턴 | Redis 잔여와 DB 잔여 비교 |
-| 발급 시 `coupon_stock.remaining_quantity` 갱신 여부 | 갱신하지 않으면 R3이 부하 테스트 직후 위반을 검출한다 |
-
-스펙이 나오면 판정식과 함께, 실행하지 못한 규칙을 결과에 어떻게 표현할지도 같이 정한다. `verification_run.verdict`에는 현재 `PASS` / `FAIL`만 있다.
-
----
-
-## 7. 알려진 제약
+## 6. 알려진 제약
 
 | 항목 | 내용 |
 | --- | --- |
 | 구조상 통과하는 규칙 | R1·R3은 현재 데이터에서 위반이 나올 수 없다. R7이 이를 보완한다 |
 | 유예 시간 결합 | `G`는 만료 배치 주기(`fixed-delay-ms`)에서 파생한다. 검증기가 이 설정을 읽어야 하므로 B2 설정에 대한 의존이 생긴다. 배치 주기를 검증기가 알 수 없는 환경(별도 프로세스 실행 등)에서는 유예를 명시적으로 넘겨야 한다 |
-| 실행계획 미확인 | 판정식 초안은 실데이터 300만 건에 실행해 전 규칙 0건을 확인했으나, `EXPLAIN` 분석은 아직이다. R5의 `BROKEN_CHAIN`이 가장 무겁다 — 600만 행을 발급 건별로 정렬해야 해서 나머지 규칙을 전부 합친 것보다 오래 걸린다 |
+| 실행계획 미확인 | `EXPLAIN` 분석은 아직이다. R5의 `BROKEN_CHAIN`이 가장 무겁다 — 600만 행을 발급 건별로 정렬해야 해서 나머지 규칙을 전부 합친 것보다 오래 걸린다 |
+| R8 선행 조건 | 발급이 진행 중이면 R8은 판정 불가로 남고 전체 판정이 `ERROR`가 된다. 부하 테스트가 끝나 스트림이 비워진 뒤 실행해야 한다 |
