@@ -24,7 +24,13 @@ import org.springframework.boot.test.context.SpringBootTest;
  *
  * <p>쿠폰 3종 × 재고 10, 회원 30명으로 시작한다. 1·2번 쿠폰은 매진, 3번은 발급 이력이 없는 시연 회차를 흉내낸다.
  */
-@SpringBootTest(properties = "spring.batch.jdbc.initialize-schema=never")
+@SpringBootTest(
+        properties = {
+            "spring.batch.jdbc.initialize-schema=never",
+            // 만료 배치가 돌면 검사 도중 상태가 바뀌어 판정이 흔들린다. 이 테스트가 만드는 발급 건은
+            // 만료 시각이 이미 지나 있어 배치가 깨어나는 순간 EXPIRED로 전환되고 이력까지 쌓인다.
+            "mocou.lifecycle.expiration.scheduler-enabled=false"
+        })
 class StockConsistencyRuleIntegrationTest extends MySqlContainerTest {
 
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 8, 23, 12, 0);
