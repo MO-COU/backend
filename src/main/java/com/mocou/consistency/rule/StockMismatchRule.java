@@ -7,7 +7,8 @@ import com.mocou.consistency.VerificationRule;
 import com.mocou.consistency.Violation;
 import com.mocou.consistency.ViolationTarget;
 import java.util.List;
-import org.springframework.jdbc.core.JdbcTemplate;
+import java.util.Map;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /**
@@ -45,7 +46,7 @@ class StockMismatchRule implements ConsistencyRule {
             GROUP BY s.coupon_id, s.total_quantity, s.remaining_quantity
             HAVING s.total_quantity <> s.remaining_quantity + issued
             ORDER BY s.coupon_id
-            LIMIT ?
+            LIMIT :limit
             """;
 
     @Override
@@ -54,7 +55,7 @@ class StockMismatchRule implements ConsistencyRule {
     }
 
     @Override
-    public RuleOutcome check(JdbcTemplate jdbcTemplate, VerificationContext context) {
+    public RuleOutcome check(NamedParameterJdbcTemplate jdbcTemplate, VerificationContext context) {
         long checkedCount = RuleQueries.count(jdbcTemplate, CHECKED_SQL);
         long violationCount = RuleQueries.count(jdbcTemplate, VIOLATION_COUNT_SQL);
         if (violationCount == 0) {
@@ -64,6 +65,7 @@ class StockMismatchRule implements ConsistencyRule {
         List<Violation> violations =
                 jdbcTemplate.query(
                         VIOLATION_SQL,
+                        Map.of("limit", context.violationLimit()),
                         (rs, rowNum) ->
                                 Violation.of(
                                         ViolationTarget.COUPON,
@@ -72,8 +74,7 @@ class StockMismatchRule implements ConsistencyRule {
                                                 .formatted(
                                                         rs.getLong("total_quantity"),
                                                         rs.getLong("issued"),
-                                                        rs.getLong("remaining_quantity"))),
-                        context.violationLimit());
+                                                        rs.getLong("remaining_quantity"))));
         return RuleOutcome.violated(rule(), checkedCount, violationCount, violations);
     }
 }

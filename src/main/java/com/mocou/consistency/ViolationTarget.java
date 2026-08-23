@@ -11,6 +11,9 @@ public enum ViolationTarget {
     /** 쿠폰 하나. 식별자는 {@code coupon_id}. */
     COUPON,
 
+    /** 회원 하나. 식별자는 {@code member_id}. */
+    MEMBER,
+
     /** 발급 건 하나. 식별자는 {@code coupon_issue_id}. */
     COUPON_ISSUE,
 

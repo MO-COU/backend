@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 /**
  * 규모를 줄여 구조만 확인한다. 판정식이 비율이 아니라 항등식이라 규모를 줄여도 그대로 성립한다.
@@ -42,6 +43,7 @@ class StockConsistencyRuleIntegrationTest extends MySqlContainerTest {
     private static final long DEMO_COUPON_ID = 3;
 
     @Autowired private List<ConsistencyRule> rules;
+    @Autowired private NamedParameterJdbcTemplate namedJdbcTemplate;
 
     private VerificationContext context;
 
@@ -175,7 +177,7 @@ class StockConsistencyRuleIntegrationTest extends MySqlContainerTest {
         VerificationContext narrow = new VerificationContext(BASE_TIME, 300, 1);
 
         // when
-        RuleOutcome outcome = ruleOf(VerificationRule.STOCK_MISMATCH).check(jdbcTemplate, narrow);
+        RuleOutcome outcome = ruleOf(VerificationRule.STOCK_MISMATCH).check(namedJdbcTemplate, narrow);
 
         // then
         assertThat(outcome.violationCount()).isEqualTo(3);
@@ -188,7 +190,7 @@ class StockConsistencyRuleIntegrationTest extends MySqlContainerTest {
                 .filter(rule -> targetRules().contains(rule.rule()))
                 .collect(
                         Collectors.toMap(
-                                ConsistencyRule::rule, rule -> rule.check(jdbcTemplate, context)));
+                                ConsistencyRule::rule, rule -> rule.check(namedJdbcTemplate, context)));
     }
 
     private List<VerificationRule> targetRules() {
