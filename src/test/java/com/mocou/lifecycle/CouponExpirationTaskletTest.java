@@ -77,12 +77,34 @@ class CouponExpirationTaskletTest {
     }
 
     @Test
+    @DisplayName("JobParameter 청크 크기가 있으면 기본 설정보다 우선한다")
+    void usesChunkSizeFromJobParameterWhenProvided() throws Exception {
+        // given
+        given(chunkContext.getStepContext()).willReturn(stepContext);
+        given(stepContext.getStepExecution()).willReturn(stepExecution);
+        given(stepExecution.getJobParameters())
+                .willReturn(
+                        new JobParametersBuilder()
+                                .addLocalDateTime("cutoffAt", CUTOFF_AT)
+                                .addLong("chunkSize", 2000L)
+                                .toJobParameters());
+        given(service.expireDueIssues(CUTOFF_AT, 2000)).willReturn(3);
+
+        // when
+        tasklet.execute(null, chunkContext);
+
+        // then
+        verify(service).expireDueIssues(CUTOFF_AT, 2000);
+    }
+
+    @Test
     @DisplayName("청크 크기가 0 이하이면 작업을 시작하지 않는다")
     void rejectsNonPositiveChunkSizeBeforeStartingWork() {
         // given
         CouponExpirationBatchProperties properties = new CouponExpirationBatchProperties();
         properties.setChunkSize(0);
         CouponExpirationTasklet invalidTasklet = new CouponExpirationTasklet(service, properties);
+        givenCutoffAt();
 
         // when, then
         assertThatThrownBy(() -> invalidTasklet.execute(null, chunkContext))
