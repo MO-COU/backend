@@ -94,11 +94,15 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
         assertThat(outcome.violationCount()).isZero();
     }
 
+    /**
+     * 재고 대조를 빼면 발급자가 없는 쿠폰에서 "검사 0건인데 위반 1건"이라는 앞뒤가 안 맞는 결과가 남는다. 발급자 수와 무관하게
+     * 쿠폰마다 한 번은 대조하므로 그만큼을 함께 센다.
+     */
     @Test
-    @DisplayName("검사 대상은 양쪽 발급자 수를 합산한다")
-    void checkedCountSumsBothSides() {
-        // when - Redis 2명 + DB 2명
-        assertThat(outcome().checkedCount()).isEqualTo(4);
+    @DisplayName("검사 대상은 양쪽 발급자 수에 재고 대조를 더한 값이다")
+    void checkedCountSumsBothSidesAndTheStockComparison() {
+        // when - Redis 2명 + DB 2명 + 재고 대조 1건
+        assertThat(outcome().checkedCount()).isEqualTo(5);
     }
 
     /** 동기화가 끝났는데도 Redis에만 있다면 DB 적재가 유실된 것이다. */
