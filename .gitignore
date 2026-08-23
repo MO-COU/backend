@@ -25,6 +25,7 @@ logs/
 # Env (application-local.yml is committed as the shared docker-compose dev config)
 .env
 .env.local
+load-test/expiration/results/
 application-secret.yml
 
 # Test / coverage
