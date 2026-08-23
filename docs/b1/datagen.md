@@ -140,6 +140,37 @@ SET s.remaining_quantity = s.total_quantity - t.issued
 
 > **주의:** 이 방식 때문에 적재 직후에는 `total = 발급 + 잔여`가 정의상 항상 성립한다. 즉 재고 정합성 규칙은 datagen 데이터만으로는 위반을 만들 수 없고, A팀 발급 경로가 붙은 뒤에야 의미를 갖는다.
 
+
+### 3.7 시연용 쿠폰 Redis 초기화 (`CouponRedisInitializationService`)
+
+Redis Lua 기반 발급 경로는 요청마다 MySQL을 조회하지 않는다. 따라서 더미데이터 적재가 끝나면 시연용 `OPEN` 쿠폰의 최종 재고와 발급 가능 시간을 Redis에 미리 저장한다.
+
+```text
+CouponSeeder
+→ MemberGenerator
+→ IssueGenerator
+→ StockReconciler
+→ CouponRedisInitializationService
+```
+
+`StockReconciler`가 실제 발급 이력을 기준으로 DB 잔여 재고를 확정한 뒤 Redis를 초기화한다. 초기화 기준값의 원본은 MySQL이며 Redis는 발급 요청을 빠르게 처리하기 위한 복사본이다.
+
+| Redis Key | 자료형 | 저장 값 |
+| --- | --- | --- |
+| `coupon:{couponId}:stock` | String | `coupon_stock.remaining_quantity` |
+| `coupon:{couponId}:metadata` | Hash | `openAtEpochSecond`, `closeAtEpochSecond` |
+
+발급 시간은 MySQL의 coupon.open_at, coupon.close_at을 Asia/Seoul 기준 Epoch Second로 변환해 저장한다. 과거 300개 회차는 부하 테스트 대상이 아니므로 초기화하지 않고, 시연용 회차 하나만 초기화한다.
+재고 Key와 Metadata Key는 Lua Script 하나에서 원자적으로 생성한다.
+
+| 초기화 결과 | 처리 |
+| --- | --- |
+| `INITIALIZED` | 두 Key를 새로 생성하고 계속 진행 |
+| `ALREADY_INITIALIZED` | 발급으로 차감됐을 수 있는 기존 재고를 덮어쓰지 않고 계속 진행 |
+| `INCONSISTENT_STATE` | 두 Key 중 하나만 존재하는 비정상 상태이므로 실행 중단 |
+
+DB 데이터가 이미 존재하면 대용량 데이터 생성은 건너뛰지만 Redis 초기화는 다시 확인한다. Redis 재시작이나 데이터 유실로 Key가 사라진 경우 DB 값을 기준으로 복구하기 위해서다.
+
 ---
 
 ## 4. 실행 방법
@@ -162,7 +193,7 @@ MySQL(3306) · Redis(6379)가 뜨고 Flyway가 스키마를 적용한다. `docke
 
 HTTP로 열지 않은 이유는, 요청 한 번이 수백만 행 적재를 유발하고 중복 실행 시 `UNIQUE (coupon_id, member_id)`에 걸려 **데이터가 절반만 들어간 상태로 남기** 때문이다.
 
-`member` 또는 `coupon`에 행이 있으면 경고를 남기고 건너뛴다. 다시 만들려면 4.4의 초기화가 먼저다.
+`member` 또는 `coupon`에 행이 있으면 대용량 데이터 생성은 건너뛴다. 다만 Redis 재시작 등으로 시연용 쿠폰 Key가 사라질 수 있으므로 Redis 초기화 상태는 다시 확인한다. DB 데이터까지 다시 만들려면 4.4의 초기화가 먼저다.
 
 기본 설정(회원 100만 + 발급 300만)은 맥 + Docker 환경에서 **약 11분** 걸린다. 중간에 멈춘 것처럼 보여도 회차별 진행 로그가 계속 찍히므로 그것으로 확인한다.
 
@@ -209,6 +240,14 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 `FOREIGN_KEY_CHECKS = 0`은 **세션 변수**다. 다른 커넥션에는 영향이 없고, 이 스크립트를 실행한 세션에서만 유효하다.
 
+로컬 Redis도 함께 초기화해야 다음 datagen 실행에서 DB 값을 다시 반영할 수 있다. 아래 명령은 현재 Redis DB의 모든 Key를 삭제하므로 로컬 전용 환경에서만 실행한다.
+
+```bash
+docker compose exec redis redis-cli FLUSHDB
+```
+
+Redis를 초기화하지 않으면 기존 재고를 보호하기 위해 ALREADY_INITIALIZED가 반환되며, DB를 다시 생성해도 Redis 재고를 덮어쓰지 않는다.
+
 ---
 
 ## 5. 적재 후 확인
@@ -232,6 +271,17 @@ HAVING s.total_quantity <> s.remaining_quantity + issued;
 ```
 
 이 쿼리들은 눈으로 확인하는 수단이며, 정식 검증 도구가 아니다. 규칙 기반 검증은 `com.mocou.consistency`가 담당한다.
+
+```text
+기본 설정에서는 시연용 쿠폰 ID가 `301`이다. Redis 초기화 결과는 다음 명령으로 확인한다.
+```
+
+```bash
+docker compose exec redis redis-cli GET "coupon:{301}:stock"
+docker compose exec redis redis-cli HGETALL "coupon:{301}:metadata"
+```
+
+stock은 기본값 10000, Metadata에는 openAtEpochSecond와 closeAtEpochSecond가 있어야 한다. round-count를 변경했다면 시연용 쿠폰 ID는 round-count + 1이다.
 
 ---
 
