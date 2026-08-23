@@ -255,9 +255,14 @@ WHERE prev_to_status IS NOT NULL AND prev_to_status <> from_status
 
 | 항목 | 값 |
 | --- | --- |
-| `checked_count` | `coupon_issue` 전체 행 수 |
+| `checked_count` | **항목별 대상 수의 합.** 발급 건을 보는 항목은 `coupon_issue` 행 수, 이력을 보는 항목은 `coupon_issue_history` 행 수를 각각 더한다 |
+| `violation_count` | **항목별 위반 수의 합.** 한 발급 건이 두 항목을 어기면 2로 센다 |
 | `target_type` | `COUPON_ISSUE` |
 | `target_id` | `coupon_issue_id` |
+
+이 규칙은 성격이 다른 항목 여럿을 한 이름으로 묶은 것이라 세는 단위가 다른 규칙과 다르다. 항목마다 대상 집합이 달라(발급 건 vs 이력 행) 하나로 합칠 수 없고, 합치면 어느 항목이 몇 개를 봤는지 사라진다. **`checked_count`가 `coupon_issue` 행 수보다 큰 것이 정상이다.**
+
+위반도 같은 이유로 항목별로 센다. 한 발급 건이 "최초 이력 없음"과 "체인 끊김"을 동시에 어기면 2건이다. 행 단위로 세면 어느 항목이 몇 번 깨졌는지 알 수 없다.
 
 정렬에 `history_id`를 함께 넣는다. `changed_at`이 같은 이력이 있을 때 순서가 흔들리면 판정이 실행마다 달라진다.
 
