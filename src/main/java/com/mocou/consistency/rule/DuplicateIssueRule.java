@@ -7,7 +7,8 @@ import com.mocou.consistency.VerificationRule;
 import com.mocou.consistency.Violation;
 import com.mocou.consistency.ViolationTarget;
 import java.util.List;
-import org.springframework.jdbc.core.JdbcTemplate;
+import java.util.Map;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /**
@@ -45,7 +46,7 @@ class DuplicateIssueRule implements ConsistencyRule {
             GROUP BY coupon_id, member_id
             HAVING COUNT(*) > 1
             ORDER BY coupon_id, member_id
-            LIMIT ?
+            LIMIT :limit
             """;
 
     @Override
@@ -54,7 +55,7 @@ class DuplicateIssueRule implements ConsistencyRule {
     }
 
     @Override
-    public RuleOutcome check(JdbcTemplate jdbcTemplate, VerificationContext context) {
+    public RuleOutcome check(NamedParameterJdbcTemplate jdbcTemplate, VerificationContext context) {
         long checkedCount = RuleQueries.count(jdbcTemplate, CHECKED_SQL);
         long violationCount = RuleQueries.count(jdbcTemplate, VIOLATION_COUNT_SQL);
         if (violationCount == 0) {
@@ -64,13 +65,13 @@ class DuplicateIssueRule implements ConsistencyRule {
         List<Violation> violations =
                 jdbcTemplate.query(
                         VIOLATION_SQL,
+                        Map.of("limit", context.violationLimit()),
                         (rs, rowNum) ->
                                 new Violation(
                                         ViolationTarget.COUPON_MEMBER_PAIR,
                                         rs.getLong("coupon_id"),
                                         rs.getLong("member_id"),
-                                        "발급 %d건".formatted(rs.getLong("issue_count"))),
-                        context.violationLimit());
+                                        "발급 %d건".formatted(rs.getLong("issue_count"))));
         return RuleOutcome.violated(rule(), checkedCount, violationCount, violations);
     }
 }

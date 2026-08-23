@@ -1,6 +1,6 @@
 package com.mocou.consistency;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 /**
  * 정합성 검증 규칙 하나의 계약.
@@ -17,11 +17,14 @@ public interface ConsistencyRule {
     /**
      * 규칙을 실행하고 결과를 돌려준다.
      *
-     * <p>{@code jdbcTemplate}을 파라미터로 받는 이유는 실행기가 연 읽기 전용 트랜잭션 안에서 돌아야 하기 때문이다. 구현체가
-     * 커넥션을 따로 잡으면 그 트랜잭션의 스냅샷 밖에서 데이터를 읽게 되고, 규칙마다 다른 시점을 보게 된다.
+     * <p>템플릿을 파라미터로 받는 이유는 실행기가 연 읽기 전용 트랜잭션 안에서 돌아야 하기 때문이다. 구현체가 커넥션을 따로 잡으면 그
+     * 트랜잭션의 스냅샷 밖에서 데이터를 읽게 되고, 규칙마다 다른 시점을 보게 된다.
+     *
+     * <p>이름 있는 파라미터를 쓴다. 위치 기반 {@code ?}는 같은 값이 여러 번 등장할 때마다 따로 넘겨야 하고, 순서가 어긋나면 예외
+     * 없이 엉뚱한 값으로 판정한다. 판정 조건이 {@code CASE}와 {@code WHERE}에 두 번씩 나오는 규칙이 있어 실제로 겪은 문제다.
      *
      * <p>위반 상세를 조회할 때는 {@code ORDER BY}를 반드시 함께 건다. 정렬 없이 {@code LIMIT}만 걸면 표본이 실행마다
      * 달라져 재현성이 깨진다.
      */
-    RuleOutcome check(JdbcTemplate jdbcTemplate, VerificationContext context);
+    RuleOutcome check(NamedParameterJdbcTemplate jdbcTemplate, VerificationContext context);
 }
