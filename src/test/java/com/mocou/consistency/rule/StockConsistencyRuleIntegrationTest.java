@@ -24,17 +24,20 @@ import org.springframework.boot.test.context.SpringBootTest;
  *
  * <p>쿠폰 3종 × 재고 10, 회원 30명으로 시작한다. 1·2번 쿠폰은 매진, 3번은 발급 이력이 없는 시연 회차를 흉내낸다.
  */
-@SpringBootTest(
-        properties = {
-            "spring.batch.jdbc.initialize-schema=never",
-            // 만료 배치가 돌면 검사 도중 상태가 바뀌어 판정이 흔들린다. 이 테스트가 만드는 발급 건은
-            // 만료 시각이 이미 지나 있어 배치가 깨어나는 순간 EXPIRED로 전환되고 이력까지 쌓인다.
-            "mocou.lifecycle.expiration.scheduler-enabled=false"
-        })
+@SpringBootTest(properties = "spring.batch.jdbc.initialize-schema=never")
 class StockConsistencyRuleIntegrationTest extends MySqlContainerTest {
 
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 8, 23, 12, 0);
     private static final int STOCK = 10;
+
+    /**
+     * 만료 시각을 먼 미래로 둔다. 이 세 규칙은 시각을 보지 않으므로 판정에는 영향이 없다.
+     *
+     * <p>만료가 지난 {@code ISSUED} 행을 남기면 만료 배치가 그것을 집어 상태를 바꾸고 이력을 쌓는다. 배치는 DB 전체를 보므로
+     * 이 클래스에서 스케줄러를 꺼도, 클래스가 끝난 뒤 다른 테스트의 컨텍스트가 남은 행을 처리한다. 그 이력이 다음 초기화의
+     * {@code DELETE FROM coupon_issue}를 FK로 막는다.
+     */
+    private static final LocalDateTime NEVER_EXPIRES = LocalDateTime.of(2099, 12, 31, 0, 0);
     private static final int MEMBER_COUNT = 30;
     private static final long DEMO_COUPON_ID = 3;
 
@@ -270,7 +273,7 @@ class StockConsistencyRuleIntegrationTest extends MySqlContainerTest {
                 couponId,
                 memberId,
                 Timestamp.valueOf(issuedAt),
-                Timestamp.valueOf(issuedAt.plusDays(14)));
+                Timestamp.valueOf(NEVER_EXPIRES));
     }
 
     /** 더미데이터 생성과 같은 방식으로 잔여 재고를 역산한다. */
