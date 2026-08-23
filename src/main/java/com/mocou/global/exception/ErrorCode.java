@@ -34,7 +34,10 @@ public enum ErrorCode {
 
     // 서버
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스를 일시적으로 사용할 수 없습니다"),
-    SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다");
+    SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다"),
+    // BusinessException으로 던져지지 않고 issue_failure_log.failure_reason 기록용으로만
+    // 쓰인다 — CouponIssueSyncConsumer가 재시도 한도를 넘겨 포기한 발급을 남길 때 사용.
+    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "쿠폰 발급 동기화에 실패했습니다");
 
     private final HttpStatus status;
     private final String message;
