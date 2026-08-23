@@ -157,6 +157,40 @@ class IssueAllocatorTest {
                 .hasMessageContaining("1인 1매");
     }
 
+    /**
+     * 회원 수가 보폭(618,041)의 배수면 한 회차의 모든 순번이 같은 회원으로 계산된다. 재고보다 회원이 많아 기존 검사는 통과하므로,
+     * 서로소 검사가 없으면 적재 도중 UNIQUE 위반으로 터진다.
+     */
+    @Test
+    @DisplayName("회원 수가 보폭과 서로소가 아니면 배분을 시작하지 않는다")
+    void refusesWhenMemberCountSharesFactorWithStride() {
+        // given - 보폭과 같은 값이라 최대공약수가 618,041이 된다
+        IssueAllocator notCoprime = new IssueAllocator(properties(618_041, ROUND_STOCK));
+
+        // when, then
+        assertThatThrownBy(() -> notCoprime.allocate(1, BASE_TIME.minusWeeks(30), BASE_TIME))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("서로소");
+    }
+
+    @Test
+    @DisplayName("당첨자가 회원 전체에 흩어진다")
+    void winnersSpreadAcrossWholeMemberRange() {
+        // given
+        LocalDateTime openAt = BASE_TIME.minusWeeks(30);
+
+        // when
+        List<Long> members =
+                allocator.allocate(30, openAt, BASE_TIME).stream()
+                        .map(IssueAllocation::memberId)
+                        .sorted()
+                        .toList();
+
+        // then - 재고가 회원의 1%뿐이라도 명단이 특정 구간에 몰리지 않는다
+        long span = members.get(members.size() - 1) - members.get(0);
+        assertThat(span).isGreaterThan(MEMBER_COUNT * 9L / 10);
+    }
+
     private void assertConsistent(IssueAllocation allocation) {
         assertThat(allocation.expiresAt()).isAfter(allocation.issuedAt());
         switch (allocation.status()) {

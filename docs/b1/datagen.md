@@ -74,15 +74,17 @@
 회차 안에서 순번 `order`(1..10,000)를 회원 번호로 옮긴다.
 
 ```
-member_id = ((order × 1000003 + roundOffset) % 1000000) + 1
+member_id = ((order × 618041 + roundOffset) % 1000000) + 1
 roundOffset = (round × 7919) % 1000000
 ```
 
-`1000003`이 회원 수 `1000000`과 서로소이므로 **순번이 다르면 회원 번호도 반드시 다르다.** 회차당 1인 1매를 코드가 보장하고, `UNIQUE (coupon_id, member_id)`가 그 결과를 DB에서 다시 확인한다.
+`618041`이 회원 수와 서로소이므로 **순번이 다르면 회원 번호도 반드시 다르다.** 회차당 1인 1매를 코드가 보장하고, `UNIQUE (coupon_id, member_id)`가 그 결과를 DB에서 다시 확인한다. 회원 수를 `618041`의 배수로 설정하면 이 성질이 깨지므로 기동 시 최대공약수를 검사해 중단한다.
 
 난수로 뽑고 충돌하면 다시 뽑는 방식은 쓰지 않았다. 재시도 횟수가 실행마다 달라지면 난수 소비량이 흔들려 재현성이 깨지기 때문이다.
 
-회차마다 `roundOffset`으로 시작점을 옮겨 당첨자 명단이 달라진다. 회원 100만 명에 발급 300만 건이므로 **회원 한 명이 평균 3회 당첨**된다.
+**보폭이 `618041`인 이유.** 서로소는 충돌만 막을 뿐 당첨자가 잘 흩어지는지는 보장하지 않는다. 보폭이 회원 수의 간단한 분수 배수(1/2, 1/3 …)에 가까우면 금방 제자리로 돌아와 특정 구간에 몰린다. `618041`은 회원 100만 기준 황금비(0.618…)에 가장 가까운 소수이며, 황금비는 어떤 분수로도 잘 근사되지 않아 가장 늦게까지 뭉치지 않는다.
+
+회차마다 `roundOffset`으로 시작점을 옮겨 당첨자 명단이 달라진다. 회원 100만 명에 발급 300만 건이므로 **회원 한 명이 평균 3회 당첨**되며, 실제 분포는 2~4회다.
 
 ### 3.3 발급 시각
 
@@ -164,7 +166,9 @@ HTTP로 열지 않은 이유는, 요청 한 번이 수백만 행 적재를 유�
 
 `member` 또는 `coupon`에 행이 있으면 경고를 남기고 건너뛴다. 다시 만들려면 4.4의 초기화가 먼저다.
 
-기본 설정(회원 100만 + 발급 300만)은 맥 + Docker 환경에서 **약 11분** 걸린다. 중간에 멈춘 것처럼 보여도 회차별 진행 로그가 계속 찍히므로 그것으로 확인한다.
+기본 설정(회원 100만 + 발급 300만)은 맥 + Docker 환경에서 **7~11분** 걸린다. 중간에 멈춘 것처럼 보여도 회차별 진행 로그가 계속 찍히므로 그것으로 확인한다.
+
+앱이 이미 8080 포트에서 돌고 있으면 기동에 실패한다. datagen은 HTTP를 쓰지 않으므로 `--server.port=0`을 붙이면 포트를 비우지 않고도 실행할 수 있다.
 
 ### 4.3 파라미터
 
@@ -190,24 +194,29 @@ HTTP로 열지 않은 이유는, 요청 한 번이 수백만 행 적재를 유�
 
 ### 4.4 초기화
 
-FK가 걸려 있어 `TRUNCATE`가 통하지 않는다. 자식 테이블부터 지운다.
+FK가 참조하는 테이블은 `TRUNCATE`가 거부되므로(`ERROR 1701`) 검사를 끄고 자식부터 지운다.
+
+**검증 실행 기록도 함께 지운다.** 데이터를 통째로 다시 만들면 그 데이터를 대상으로 한 검증 결과는 의미가 없고, `verification_run.issue_run_id`가 `coupon_issue_run`을 참조하므로 남겨두면 끊어진 참조가 된다.
 
 ```sql
 SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE verification_violation;
+TRUNCATE TABLE verification_rule_result;
+TRUNCATE TABLE verification_run;
+TRUNCATE TABLE coupon_issue_run;
 TRUNCATE TABLE coupon_issue_history;
 TRUNCATE TABLE coupon_issue;
 TRUNCATE TABLE notification;
 TRUNCATE TABLE issue_failure_log;
-TRUNCATE TABLE coupon_issue_run;
 TRUNCATE TABLE coupon_stock;
 TRUNCATE TABLE coupon;
 TRUNCATE TABLE member;
 SET FOREIGN_KEY_CHECKS = 1;
 ```
 
-`verification_*` 3종은 검증 실행 기록이라 데이터 재생성과 무관하다. 함께 지우려면 `verification_violation` → `verification_rule_result` → `verification_run` 순서를 지킨다.
+검증 기록을 보존해야 한다면 `coupon_issue_run`을 지우지 않는 부분 삭제 절차를 따로 써야 한다. 위 스크립트는 전체 초기화 전용이다.
 
-`FOREIGN_KEY_CHECKS = 0`은 **세션 변수**다. 다른 커넥션에는 영향이 없고, 이 스크립트를 실행한 세션에서만 유효하다.
+`FOREIGN_KEY_CHECKS = 0`은 **세션 변수**다. 다른 커넥션에는 영향이 없고 이 스크립트를 실행한 세션에서만 유효하며, 켜져 있는 동안에는 부모 테이블을 지워도 막히지 않는다. 순서를 지키지 않으면 에러 없이 고아 행이 남는다.
 
 ---
 
@@ -231,7 +240,9 @@ GROUP BY s.coupon_id, s.total_quantity, s.remaining_quantity
 HAVING s.total_quantity <> s.remaining_quantity + issued;
 ```
 
-이 쿼리들은 눈으로 확인하는 수단이며, 정식 검증 도구가 아니다. 규칙 기반 검증은 `com.mocou.consistency`가 담당한다.
+이 쿼리들은 눈으로 확인하는 수단이며, 정식 검증 도구가 아니다.
+
+규칙 기반 검증은 `com.mocou.consistency`(B1 담당)가 맡는다. **판정식은 [정합성 검증 규칙 명세](./consistency-rules.md)에 확정돼 있고 구현은 예정 상태다.** 구현 전까지 정합성 확인은 위 쿼리와 명세의 판정식을 직접 실행하는 방법뿐이다.
 
 ---
 
