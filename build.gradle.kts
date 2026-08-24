@@ -32,6 +32,9 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-validation")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 
+	// API 문서 (Swagger UI)
+	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")
+
 	// Persistence
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 	implementation("org.springframework.boot:spring-boot-starter-jdbc")
@@ -72,12 +75,14 @@ dependencies {
 
 dependencyManagement {
 	imports {
-		mavenBom("org.testcontainers:testcontainers-bom:1.20.2")
+		mavenBom("org.testcontainers:testcontainers-bom:1.21.4")
 	}
 }
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// 로컬/CI 테스트 JVM 기본값(UTC)을 Asia/Seoul로 고정
+	systemProperty("user.timezone", "Asia/Seoul")
 }
 
 sourceSets {

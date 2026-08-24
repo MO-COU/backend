@@ -30,7 +30,7 @@ CREATE TABLE coupon (
     discount_rate  INT          NOT NULL,
     open_at        DATETIME     NOT NULL COMMENT '쿠폰 발급 시작 일시',
     close_at       DATETIME     NOT NULL COMMENT '쿠폰 발급 종료 일시',
-    status         VARCHAR(20)  NOT NULL COMMENT 'READY, OPEN, SOLD_OUT, CLOSED',
+    status         VARCHAR(20)  NOT NULL COMMENT 'SCHEDULED / OPEN / CLOSED',
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (coupon_id)
