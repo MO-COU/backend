@@ -1,0 +1,8 @@
+# EC2 배포용 설정. DB/Redis 접속 정보는 docker-compose.prod.yml에서.
+spring:
+  jpa:
+    hibernate:
+      # local과 동일하게 validate로 둔다. 엔티티와 실제 스키마가 어긋나면 조용히 넘어가지 않고 실패 확인
+      ddl-auto: validate
+    # 기본값(true)로 두면 요청이 끝날 때까지 커넥션을 계속 붙잡는다(Open Session In View).
+    open-in-view: false

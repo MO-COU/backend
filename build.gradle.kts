@@ -32,6 +32,9 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-validation")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 
+	// API 문서 (Swagger UI)
+	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")
+
 	// Persistence
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 	implementation("org.springframework.boot:spring-boot-starter-jdbc")
