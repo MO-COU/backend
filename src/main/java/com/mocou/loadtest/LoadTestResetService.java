@@ -31,6 +31,7 @@ public class LoadTestResetService {
     private final CouponRedisInitializationService redisInitializationService;
     private final StringRedisTemplate redisTemplate;
     private final TransactionTemplate transactionTemplate;
+    private final RedisCouponIssueSyncGateway syncGateway;
 
     /**
      * 되돌린다.
@@ -163,5 +164,7 @@ public class LoadTestResetService {
             throw new IllegalStateException(
                     "리셋 후 Redis 초기화가 예상과 다르다. couponId=%d, result=%s".formatted(couponId, result));
         }
+
+        syncGateway.ensureConsumerGroup(couponId);
     }
 }
