@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.util.concurrent.Executor;
 import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
+import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -72,6 +73,13 @@ public class ExpirationJobControlService {
                             .addLocalDateTime("cutoffAt", cutoffAt)
                             .toJobParameters();
             JobExecution execution = jobOperator.start(couponExpirationJob, parameters);
+            if (execution.getStatus() != BatchStatus.COMPLETED) {
+                registry.fail(
+                        runKey,
+                        LocalDateTime.now(),
+                        "BATCH_STATUS_" + execution.getStatus());
+                return;
+            }
             registry.complete(runKey, execution.getId(), LocalDateTime.now(), chunkResults(execution));
         } catch (Exception exception) {
             registry.fail(runKey, LocalDateTime.now(), "JOB_EXECUTION_FAILED");

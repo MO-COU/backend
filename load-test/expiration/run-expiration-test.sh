@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 # shellcheck source=lib/batch-control.sh
 source "$SCRIPT_DIR/lib/batch-control.sh"
 
-scenario=""; chunk_sizes=""; chunk_size=""; repeats=3; warmups=1; arrival_rate=333
+scenario=""; chunk_sizes=""; chunk_size=""; repeats=3; warmups=1; arrival_rate=333; has_failures=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --scenario) scenario="$2"; shift 2;;
@@ -26,6 +26,12 @@ if [[ "$scenario" == "compare-chunks" ]]; then [[ "$chunk_sizes" =~ ^[0-9]+(,[0-
 if [[ "$scenario" == "race" ]]; then [[ "$chunk_size" =~ ^[0-9]+$ ]] || die "--chunk-size is required"; fi
 
 preflight
+if [[ "$scenario" == "compare-chunks" ]]; then
+  IFS=',' read -r -a validated_chunks <<< "$chunk_sizes"
+  for chunk in "${validated_chunks[@]}"; do validate_chunk_size "$chunk"; done
+else
+  validate_chunk_size "$chunk_size"
+fi
 
 run_id="$(date +%Y%m%d-%H%M%S)-$scenario"
 result_dir="$SCRIPT_DIR/results/$run_id"
@@ -70,10 +76,12 @@ metric_value() { awk -F= -v key="$2" '$1 == key { print $2 }' "$1"; }
 
 append_batch_result() {
   local section="$1" chunk="$2" repeat="$3" raw_dir="$4"
-  local duration issued expired invalid invalid_final conflicting used_after_expiry result
+  local duration issued used expired used_notification invalid invalid_final conflicting used_after_expiry result
   duration="$(jq -r '.data.durationMs // 0' "$raw_dir/batch-status.json")"
   issued="$(metric_value "$raw_dir/consistency.txt" ISSUED)"
+  used="$(metric_value "$raw_dir/consistency.txt" USED)"
   expired="$(metric_value "$raw_dir/consistency.txt" EXPIRED)"
+  used_notification="$(metric_value "$raw_dir/consistency.txt" USED_NOTIFICATION)"
   invalid="$(metric_value "$raw_dir/consistency.txt" INVALID_HISTORY)"
   invalid_final="$(metric_value "$raw_dir/consistency.txt" INVALID_FINAL_HISTORY)"
   conflicting="$(metric_value "$raw_dir/consistency.txt" CONFLICTING_FINAL_HISTORY)"
@@ -81,27 +89,34 @@ append_batch_result() {
   result="PASS"
   [[ "$(jq -r '.data.status' "$raw_dir/batch-status.json")" == "COMPLETED" && "$issued" == "0" && "$expired" == "10000" && "$invalid" == "0" && "$invalid_final" == "0" && "$conflicting" == "0" && "$used_after_expiry" == "0" ]] || result="FAIL"
   if [[ "$section" == "A" ]]; then
+    [[ "$used" == "0" && "$used_notification" == "0" ]] || result="FAIL"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$chunk" "$repeat" "$duration" "$issued" "$expired" "$invalid" "$result" >> "$result_dir/result.txt"
   else
-    local used requests dropped timing_delta
-    used="$(metric_value "$raw_dir/consistency.txt" USED)"
+    local requests dropped timing_delta
     requests="$(jq -r '.metrics.http_reqs.values.count // 0' "$raw_dir/k6-summary.json")"
     dropped="$(jq -r '.metrics.dropped_iterations.values.count // 0' "$raw_dir/k6-summary.json")"
     timing_delta="$(cat "$raw_dir/timing-delta-ms.txt")"
-    [[ $((used + expired)) -eq 10000 && "$requests" == "10000" && "$dropped" == "0" && "$timing_delta" -le 1000 && "$(cat "$raw_dir/k6-exit.txt")" == "0" ]] || result="FAIL"
+    [[ $((used + expired)) -eq 10000 && "$used_notification" == "$used" && "$requests" == "10000" && "$dropped" == "0" && "$timing_delta" -le 1000 && "$(cat "$raw_dir/k6-exit.txt")" == "0" ]] || result="FAIL"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$chunk" "$repeat" "$duration" "$timing_delta" "$requests" "$dropped" "$used" "$expired" "$issued" "$invalid" "$result" >> "$result_dir/result.txt"
   fi
+  [[ "$result" == "PASS" ]] || has_failures=1
 }
 
 run_batch_only() {
-  local chunk="$1" repeat="$2" raw_dir="$result_dir/raw/batch-only-$chunk-$repeat" run_key="${run_id}-a-${chunk}-${repeat}"
+  local chunk="$1" repeat="$2" record_result="$3" raw_dir="$result_dir/raw/batch-only-$chunk-$repeat" run_key="${run_id}-a-${chunk}-${repeat}"
   mkdir -p "$raw_dir"; prepare_batch_data "$run_key" "$raw_dir"
   collect_runtime_metrics "$raw_dir" before
-  start_expiration_job "$run_key" "$chunk" > "$raw_dir/request.json"
-  wait_for_completion "$run_key" "$raw_dir/batch-status.json"
+  if ! start_expiration_job "$run_key" "$chunk" > "$raw_dir/request.json"; then
+    mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null
+    return 1
+  fi
+  if ! wait_for_completion "$run_key" "$raw_dir/batch-status.json"; then
+    mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null
+    return 1
+  fi
   collect_runtime_metrics "$raw_dir" after
   mysql_verify_coupon "$SCRIPT_DIR/sql/verify-final-state.sql" "$(cat "$raw_dir/coupon-id.txt")" > "$raw_dir/consistency.txt"
-  append_batch_result A "$chunk" "$repeat" "$raw_dir"
+  if (( record_result )); then append_batch_result A "$chunk" "$repeat" "$raw_dir"; fi
   mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null
 }
 
@@ -119,8 +134,18 @@ run_race() {
   local k6_pid=$!
   # T에 perf API를 호출한다. API가 반환한 cutoffAt이 실제 B다.
   wait_until_mysql_time "$race_time" 0
-  start_expiration_job "$run_key" "$chunk_size" > "$raw_dir/request.json"
-  wait_for_completion "$run_key" "$raw_dir/batch-status.json"
+  if ! start_expiration_job "$run_key" "$chunk_size" > "$raw_dir/request.json"; then
+    kill -INT "$k6_pid" 2>/dev/null || true
+    wait "$k6_pid" || true
+    mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null
+    return 1
+  fi
+  if ! wait_for_completion "$run_key" "$raw_dir/batch-status.json"; then
+    kill -INT "$k6_pid" 2>/dev/null || true
+    wait "$k6_pid" || true
+    mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null
+    return 1
+  fi
   local cutoff_at
   cutoff_at="$(jq -r '.data.cutoffAt' "$raw_dir/batch-status.json")"
   mysql_exec --skip-column-names -e "SELECT ABS(TIMESTAMPDIFF(MICROSECOND, '$race_time', '$cutoff_at')) DIV 1000" > "$raw_dir/timing-delta-ms.txt"
@@ -146,31 +171,50 @@ run_sustained() {
   mysql_exec --skip-column-names -e "SELECT JSON_ARRAYAGG(coupon_issue_id) FROM coupon_issue WHERE coupon_id = $coupon_id AND expires_at > CURRENT_TIMESTAMP" > "$raw_dir/issue-ids.json"
   TARGET="$APP_BASE_URL" ISSUE_IDS_PATH="$raw_dir/issue-ids.json" ARRIVAL_RATE="$arrival_rate" k6 run --summary-export "$raw_dir/k6-summary.json" "$SCRIPT_DIR/k6/sustained.js" > "$raw_dir/k6-output.log" 2>&1 &
   local k6_pid=$!
-  start_expiration_job "$run_key" "$chunk" > "$raw_dir/request.json"
-  wait_for_completion "$run_key" "$raw_dir/batch-status.json"
+  if ! start_expiration_job "$run_key" "$chunk" > "$raw_dir/request.json"; then
+    kill -INT "$k6_pid" 2>/dev/null || true
+    wait "$k6_pid" || true
+    mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null
+    return 1
+  fi
+  if ! wait_for_completion "$run_key" "$raw_dir/batch-status.json"; then
+    kill -INT "$k6_pid" 2>/dev/null || true
+    wait "$k6_pid" || true
+    mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null
+    return 1
+  fi
   kill -INT "$k6_pid" 2>/dev/null || true
-  wait "$k6_pid" || true
+  local k6_exit=0
+  wait "$k6_pid" || k6_exit=$?
   collect_runtime_metrics "$raw_dir" after
   printf 'sustained_chunk=%s\nsustained_repeat=%s\n' "$chunk" "$repeat" >> "$result_dir/result.txt"
   cat "$raw_dir/batch-status.json" >> "$result_dir/result.txt"
   mysql_verify_coupon "$SCRIPT_DIR/sql/verify-final-state.sql" "$coupon_id" > "$raw_dir/consistency.txt"
-  local duration p95 p99 dropped api_success api_used result
+  local duration p95 p99 dropped api_success api_used issued expired used_notification invalid invalid_final conflicting used_after_expiry result
   duration="$(jq -r '.data.durationMs // 0' "$raw_dir/batch-status.json")"
   p95="$(jq -r '.metrics.http_req_duration.values["p(95)"] // "N/A"' "$raw_dir/k6-summary.json")"
   p99="$(jq -r '.metrics.http_req_duration.values["p(99)"] // "N/A"' "$raw_dir/k6-summary.json")"
   dropped="$(jq -r '.metrics.dropped_iterations.values.count // 0' "$raw_dir/k6-summary.json")"
   api_success="$(jq -r '.metrics.use_success.values.count // 0' "$raw_dir/k6-summary.json")"
   api_used="$(mysql_exec --skip-column-names -e "SELECT COUNT(*) FROM coupon_issue i JOIN member m ON m.member_id = i.member_id WHERE i.coupon_id = $coupon_id AND i.status = 'USED' AND m.email LIKE 'perf-$run_key-api-%@example.invalid'")"
-  result="PASS"; [[ "$dropped" == "0" && "$api_success" == "$api_used" ]] || result="FAIL"
+  issued="$(metric_value "$raw_dir/consistency.txt" ISSUED)"
+  expired="$(metric_value "$raw_dir/consistency.txt" EXPIRED)"
+  used_notification="$(metric_value "$raw_dir/consistency.txt" USED_NOTIFICATION)"
+  invalid="$(metric_value "$raw_dir/consistency.txt" INVALID_HISTORY)"
+  invalid_final="$(metric_value "$raw_dir/consistency.txt" INVALID_FINAL_HISTORY)"
+  conflicting="$(metric_value "$raw_dir/consistency.txt" CONFLICTING_FINAL_HISTORY)"
+  used_after_expiry="$(metric_value "$raw_dir/consistency.txt" USED_AFTER_EXPIRY)"
+  result="PASS"; [[ "$(jq -r '.data.status' "$raw_dir/batch-status.json")" == "COMPLETED" && "$k6_exit" == "0" && "$dropped" == "0" && "$api_success" == "$api_used" && "$expired" == "10000" && "$used_notification" == "$api_used" && "$invalid" == "0" && "$invalid_final" == "0" && "$conflicting" == "0" && "$used_after_expiry" == "0" ]] || result="FAIL"
   if ! grep -q '^\[C 지속 API 부하\]' "$result_dir/result.txt"; then printf '\n[C 지속 API 부하]\nchunk\trepeat\tdurationMs\tapiP95Ms\tapiP99Ms\tapiSuccess\tapiUsed\tdropped\tresult\n' >> "$result_dir/result.txt"; fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$chunk" "$repeat" "$duration" "$p95" "$p99" "$api_success" "$api_used" "$dropped" "$result" >> "$result_dir/result.txt"
+  [[ "$result" == "PASS" ]] || has_failures=1
   mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null
 }
 
 if [[ "$scenario" == "compare-chunks" ]]; then
   IFS=',' read -r -a chunks <<< "$chunk_sizes"
   for chunk in "${chunks[@]}"; do
-    for ((iteration=0; iteration<warmups+repeats; iteration++)); do run_batch_only "$chunk" "$iteration"; done
+    for ((iteration=0; iteration<warmups+repeats; iteration++)); do run_batch_only "$chunk" "$iteration" "$((iteration >= warmups))"; done
   done
   for chunk in "${chunks[@]}"; do
     for ((iteration=1; iteration<=repeats; iteration++)); do run_sustained "$chunk" "$iteration"; done
@@ -178,3 +222,5 @@ if [[ "$scenario" == "compare-chunks" ]]; then
 else
   for ((iteration=1; iteration<=repeats; iteration++)); do run_race "$iteration"; done
 fi
+
+(( has_failures == 0 )) || exit 1

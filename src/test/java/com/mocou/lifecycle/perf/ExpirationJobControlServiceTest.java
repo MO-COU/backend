@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -40,6 +41,7 @@ class ExpirationJobControlServiceTest {
         given(jobOperator.start(eq(couponExpirationJob), org.mockito.ArgumentMatchers.any(JobParameters.class)))
                 .willReturn(jobExecution);
         given(jobExecution.getId()).willReturn(42L);
+        given(jobExecution.getStatus()).willReturn(BatchStatus.COMPLETED);
         ExpirationJobControlService service =
                 new ExpirationJobControlService(
                         jobOperator,
@@ -86,5 +88,32 @@ class ExpirationJobControlServiceTest {
         assertThat(service.find("failed-run").status()).isEqualTo(ExpirationJobRunStatus.FAILED);
         assertThat(service.find("failed-run").failureReason()).isEqualTo("JOB_EXECUTION_FAILED");
         assertThat(next.status()).isEqualTo(ExpirationJobReservationStatus.ACCEPTED);
+    }
+
+    @Test
+    @DisplayName("Batch 실행이 실패하면 FAILED 상태와 원인을 기록한다")
+    void recordsFailedStatusWhenBatchExecutionFails() throws Exception {
+        // given
+        given(jobRepository.findRunningJobExecutions("couponExpirationJob")).willReturn(Set.of());
+        given(expirationClock.now()).willReturn(DATABASE_TIME);
+        given(jobOperator.start(eq(couponExpirationJob), org.mockito.ArgumentMatchers.any(JobParameters.class)))
+                .willReturn(jobExecution);
+        given(jobExecution.getStatus()).willReturn(BatchStatus.FAILED);
+        ExpirationJobControlService service =
+                new ExpirationJobControlService(
+                        jobOperator,
+                        jobRepository,
+                        couponExpirationJob,
+                        expirationClock,
+                        new ExpirationJobRunRegistry(),
+                        Runnable::run);
+
+        // when
+        service.submit("failed-batch-run", 2000);
+
+        // then
+        ExpirationJobRunSnapshot snapshot = service.find("failed-batch-run");
+        assertThat(snapshot.status()).isEqualTo(ExpirationJobRunStatus.FAILED);
+        assertThat(snapshot.failureReason()).isEqualTo("BATCH_STATUS_FAILED");
     }
 }

@@ -6,6 +6,8 @@ EXPIRATION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # localhost는 개발 PC가 아니라 해당 EC2 호스트가 공개한 app(8080) 포트다.
 APP_BASE_URL="${APP_BASE_URL:-http://localhost:8080}"
 MANAGEMENT_BASE_URL="${MANAGEMENT_BASE_URL:-$APP_BASE_URL}"
+MIN_CHUNK_SIZE=""
+MAX_CHUNK_SIZE=""
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -61,7 +63,15 @@ preflight() {
   capabilities="$(curl --fail --silent --show-error "$MANAGEMENT_BASE_URL/internal/perf/expiration-jobs/capabilities")"
   [[ "$(jq -r '.data.controlEnabled' <<<"$capabilities")" == "true" ]] || die "perf control API is disabled"
   [[ "$(jq -r '.data.schedulerEnabled' <<<"$capabilities")" == "false" ]] || die "expiration scheduler must be disabled"
+  MIN_CHUNK_SIZE="$(jq -r '.data.minChunkSize' <<<"$capabilities")"
+  MAX_CHUNK_SIZE="$(jq -r '.data.maxChunkSize' <<<"$capabilities")"
+  [[ "$MIN_CHUNK_SIZE" =~ ^[0-9]+$ && "$MAX_CHUNK_SIZE" =~ ^[0-9]+$ && "$MIN_CHUNK_SIZE" -le "$MAX_CHUNK_SIZE" ]] || die "invalid chunk-size capability"
   mysql_exec --skip-column-names -e 'SELECT CURRENT_TIMESTAMP' >/dev/null
+}
+
+validate_chunk_size() {
+  local chunk_size="$1"
+  (( chunk_size >= MIN_CHUNK_SIZE && chunk_size <= MAX_CHUNK_SIZE )) || die "chunk size must be between $MIN_CHUNK_SIZE and $MAX_CHUNK_SIZE"
 }
 
 collect_runtime_metrics() {

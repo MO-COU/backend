@@ -2,6 +2,9 @@
 SELECT CONCAT('ISSUED=', COUNT(*)) FROM coupon_issue WHERE coupon_id = @coupon_id AND status = 'ISSUED';
 SELECT CONCAT('USED=', COUNT(*)) FROM coupon_issue WHERE coupon_id = @coupon_id AND status = 'USED';
 SELECT CONCAT('EXPIRED=', COUNT(*)) FROM coupon_issue WHERE coupon_id = @coupon_id AND status = 'EXPIRED';
+SELECT CONCAT('USED_NOTIFICATION=', COUNT(*))
+FROM notification
+WHERE coupon_id = @coupon_id AND type = 'USED';
 SELECT CONCAT('INVALID_HISTORY=', COUNT(*))
 FROM coupon_issue i
 WHERE i.coupon_id = @coupon_id AND (
