@@ -45,7 +45,7 @@ services:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/mocou?characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/mocou?characterEncoding=UTF-8&serverTimezone=Asia/Seoul&rewriteBatchedStatements=true
       SPRING_DATASOURCE_USERNAME: mocou
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_APP_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
