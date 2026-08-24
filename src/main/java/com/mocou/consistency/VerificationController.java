@@ -3,6 +3,8 @@ package com.mocou.consistency;
 import com.mocou.global.response.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -14,17 +16,19 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>부하 테스트가 끝난 뒤 검증하는 흐름이라 프로필 러너 대신 API로 연다. 러너는 앱을 껐다 켜야 하는데, 이미 떠 있는 앱에 요청 한 번을
  * 보내는 편이 시연에 맞다.
  *
- * <p>결과 조회는 여기서 제공하지 않는다. 관리자 화면용 조회는 C팀 담당(`FR-5.3`)이며
- * {@code verification_run}·{@code verification_rule_result}를 읽으면 된다.
+ * <p>실행 번호로 진행 상태와 결과를 다시 조회할 수 있다.
  */
 @RestController
 @RequestMapping("/api/admin/verifications")
 public class VerificationController {
 
     private final VerificationLauncher launcher;
+    private final VerificationResultQueryService queryService;
 
-    public VerificationController(VerificationLauncher launcher) {
+    public VerificationController(
+            VerificationLauncher launcher, VerificationResultQueryService queryService) {
         this.launcher = launcher;
+        this.queryService = queryService;
     }
 
     /**
@@ -40,5 +44,11 @@ public class VerificationController {
         long runId = launcher.launch(issueRunId);
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(VerificationStartResponse.started(runId)));
+    }
+
+    @GetMapping("/{runId}")
+    public ResponseEntity<ApiResponse<VerificationResultResponse>> getResult(
+            @PathVariable long runId) {
+        return ResponseEntity.ok(ApiResponse.success(queryService.getResult(runId)));
     }
 }
