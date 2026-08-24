@@ -2,6 +2,7 @@ package com.mocou.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.BDDMockito.given;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.context.ApplicationEventPublisher;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.InjectMocks;
@@ -24,10 +26,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class CouponUseServiceTest {
 
     private static final long ISSUE_ID = 42L;
+    private static final long COUPON_ID = 2001L;
+    private static final long MEMBER_ID = 1001L;
     private static final String IDEMPOTENCY_KEY = "use-request-1";
     private static final LocalDateTime USED_AT = LocalDateTime.of(2026, 8, 18, 15, 30);
 
     @Mock private CouponUseRepository repository;
+    @Mock private ApplicationEventPublisher eventPublisher;
     @InjectMocks private CouponUseService service;
 
     @Test
@@ -41,7 +46,12 @@ class CouponUseServiceTest {
                 .willReturn(
                         Optional.of(
                                 new CouponIssueState(
-                                        ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
+                                        ISSUE_ID,
+                                        COUPON_ID,
+                                        MEMBER_ID,
+                                        CouponIssueStatus.USED,
+                                        USED_AT,
+                                        false)));
 
         // when
         CouponUseResult result = service.use(ISSUE_ID, IDEMPOTENCY_KEY);
@@ -50,6 +60,13 @@ class CouponUseServiceTest {
         assertThat(result)
                 .isEqualTo(new CouponUseResult(ISSUE_ID, CouponIssueStatus.USED, USED_AT));
         verify(repository).saveUsedHistory(ISSUE_ID, IDEMPOTENCY_KEY);
+        verify(eventPublisher)
+                .publishEvent(
+                        argThat(
+                                (Object event) ->
+                                        event.equals(
+                                                new CouponUsedEvent(
+                                                        ISSUE_ID, COUPON_ID, MEMBER_ID))));
     }
 
     @Test
@@ -62,7 +79,12 @@ class CouponUseServiceTest {
                 .willReturn(
                         Optional.of(
                                 new CouponIssueState(
-                                        ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
+                                        ISSUE_ID,
+                                        COUPON_ID,
+                                        MEMBER_ID,
+                                        CouponIssueStatus.USED,
+                                        USED_AT,
+                                        false)));
 
         // when
         CouponUseResult result = service.use(ISSUE_ID, IDEMPOTENCY_KEY);
@@ -71,6 +93,7 @@ class CouponUseServiceTest {
         assertThat(result.usedAt()).isEqualTo(USED_AT);
         verify(repository, never()).markUsed(ISSUE_ID);
         verify(repository, never()).saveUsedHistory(ISSUE_ID, IDEMPOTENCY_KEY);
+        verify(eventPublisher, never()).publishEvent(argThat((Object event) -> true));
     }
 
     @Test
@@ -110,7 +133,12 @@ class CouponUseServiceTest {
                 .willReturn(
                         Optional.of(
                                 new CouponIssueState(
-                                        ISSUE_ID, CouponIssueStatus.ISSUED, null, true)));
+                                        ISSUE_ID,
+                                        COUPON_ID,
+                                        MEMBER_ID,
+                                        CouponIssueStatus.ISSUED,
+                                        null,
+                                        true)));
 
         // when, then
         assertError(ErrorCode.COUPON_EXPIRED);
@@ -127,7 +155,12 @@ class CouponUseServiceTest {
                 .willReturn(
                         Optional.of(
                                 new CouponIssueState(
-                                        ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
+                                        ISSUE_ID,
+                                        COUPON_ID,
+                                        MEMBER_ID,
+                                        CouponIssueStatus.USED,
+                                        USED_AT,
+                                        false)));
 
         // when, then
         assertError(ErrorCode.INVALID_STATE_TRANSITION);
@@ -144,7 +177,12 @@ class CouponUseServiceTest {
                 .willReturn(
                         Optional.of(
                                 new CouponIssueState(
-                                        ISSUE_ID, CouponIssueStatus.EXPIRED, null, true)));
+                                        ISSUE_ID,
+                                        COUPON_ID,
+                                        MEMBER_ID,
+                                        CouponIssueStatus.EXPIRED,
+                                        null,
+                                        true)));
 
         // when, then
         assertError(ErrorCode.COUPON_EXPIRED);
@@ -162,7 +200,12 @@ class CouponUseServiceTest {
                 .willReturn(
                         Optional.of(
                                 new CouponIssueState(
-                                        ISSUE_ID, CouponIssueStatus.USED, USED_AT, false)));
+                                        ISSUE_ID,
+                                        COUPON_ID,
+                                        MEMBER_ID,
+                                        CouponIssueStatus.USED,
+                                        USED_AT,
+                                        false)));
 
         // when
         CouponUseResult result = service.use(ISSUE_ID, IDEMPOTENCY_KEY);
