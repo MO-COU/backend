@@ -98,6 +98,27 @@ class CouponExpirationTaskletTest {
     }
 
     @Test
+    @DisplayName("JobParameter 쿠폰 ID가 있으면 해당 쿠폰 범위로 만료 처리한다")
+    void scopesExpirationToCouponIdWhenProvided() throws Exception {
+        // given
+        given(chunkContext.getStepContext()).willReturn(stepContext);
+        given(stepContext.getStepExecution()).willReturn(stepExecution);
+        given(stepExecution.getJobParameters())
+                .willReturn(
+                        new JobParametersBuilder()
+                                .addLocalDateTime("cutoffAt", CUTOFF_AT)
+                                .addLong("couponId", 2001L)
+                                .toJobParameters());
+        given(service.expireDueIssues(CUTOFF_AT, 1000, 2001L)).willReturn(3);
+
+        // when
+        tasklet.execute(null, chunkContext);
+
+        // then
+        verify(service).expireDueIssues(CUTOFF_AT, 1000, 2001L);
+    }
+
+    @Test
     @DisplayName("청크 크기가 0 이하이면 작업을 시작하지 않는다")
     void rejectsNonPositiveChunkSizeBeforeStartingWork() {
         // given

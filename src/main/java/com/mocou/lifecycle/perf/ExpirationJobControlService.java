@@ -41,6 +41,10 @@ public class ExpirationJobControlService {
     }
 
     public ExpirationJobRunSnapshot submit(String runKey, int chunkSize) {
+        return submit(runKey, chunkSize, null);
+    }
+
+    public ExpirationJobRunSnapshot submit(String runKey, int chunkSize, Long couponId) {
         if (!jobRepository.findRunningJobExecutions(JOB_NAME).isEmpty()) {
             throw new IllegalStateException("JOB_ALREADY_RUNNING");
         }
@@ -49,7 +53,7 @@ public class ExpirationJobControlService {
             throw new IllegalStateException(reservation.status().name());
         }
         try {
-            executor.execute(() -> run(runKey, chunkSize));
+            executor.execute(() -> run(runKey, chunkSize, couponId));
         } catch (RejectedExecutionException exception) {
             registry.fail(runKey, LocalDateTime.now(), "EXECUTOR_UNAVAILABLE");
             throw new IllegalStateException("EXECUTOR_UNAVAILABLE", exception);
@@ -61,18 +65,20 @@ public class ExpirationJobControlService {
         return registry.find(runKey);
     }
 
-    private void run(String runKey, int chunkSize) {
+    private void run(String runKey, int chunkSize, Long couponId) {
         try {
             LocalDateTime cutoffAt = expirationClock.now();
             LocalDateTime startedAt = LocalDateTime.now();
             registry.markRunning(runKey, cutoffAt, startedAt);
-            JobParameters parameters =
+            JobParametersBuilder parameters =
                     new JobParametersBuilder()
                             .addString("runKey", runKey)
                             .addLong("chunkSize", (long) chunkSize)
-                            .addLocalDateTime("cutoffAt", cutoffAt)
-                            .toJobParameters();
-            JobExecution execution = jobOperator.start(couponExpirationJob, parameters);
+                            .addLocalDateTime("cutoffAt", cutoffAt);
+            if (couponId != null) {
+                parameters.addLong("couponId", couponId);
+            }
+            JobExecution execution = jobOperator.start(couponExpirationJob, parameters.toJobParameters());
             if (execution.getStatus() != BatchStatus.COMPLETED) {
                 registry.fail(
                         runKey,

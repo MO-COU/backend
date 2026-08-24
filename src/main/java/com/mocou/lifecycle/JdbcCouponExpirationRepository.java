@@ -30,6 +30,22 @@ public class JdbcCouponExpirationRepository implements CouponExpirationRepositor
     }
 
     @Override
+    public List<CouponExpirationCandidate> findDueIssues(
+            LocalDateTime cutoffAt, int limit, long couponId) {
+        return jdbcTemplate.query(
+                "SELECT coupon_issue_id, expires_at FROM coupon_issue "
+                        + "WHERE coupon_id = ? AND status = 'ISSUED' AND expires_at <= ? "
+                        + "ORDER BY expires_at, coupon_issue_id LIMIT ?",
+                (resultSet, rowNumber) ->
+                        new CouponExpirationCandidate(
+                                resultSet.getLong("coupon_issue_id"),
+                                resultSet.getTimestamp("expires_at").toLocalDateTime()),
+                couponId,
+                cutoffAt,
+                limit);
+    }
+
+    @Override
     public int[] markExpiredBatch(
             List<CouponExpirationCandidate> candidates, LocalDateTime cutoffAt) {
         return jdbcTemplate.batchUpdate(

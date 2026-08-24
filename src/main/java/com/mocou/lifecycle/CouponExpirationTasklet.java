@@ -33,9 +33,12 @@ public class CouponExpirationTasklet implements Tasklet {
         if (cutoffAt == null) {
             throw new IllegalArgumentException("cutoffAt job parameter is required");
         }
+        Long couponId = jobParameters.getLong("couponId");
 
         long startedAt = System.nanoTime();
-        int selectedCount = service.expireDueIssues(cutoffAt, chunkSize);
+        int selectedCount = couponId == null
+                ? service.expireDueIssues(cutoffAt, chunkSize)
+                : service.expireDueIssues(cutoffAt, chunkSize, couponId);
         long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
         recordChunkResult(stepExecution.getExecutionContext(), jobParameters, selectedCount, durationMs);
         return RepeatStatus.continueIf(selectedCount == chunkSize);

@@ -21,6 +21,17 @@ public class CouponExpirationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public int expireDueIssues(LocalDateTime cutoffAt, int chunkSize) {
         List<CouponExpirationCandidate> candidates = repository.findDueIssues(cutoffAt, chunkSize);
+        return expireCandidates(candidates, cutoffAt);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public int expireDueIssues(LocalDateTime cutoffAt, int chunkSize, long couponId) {
+        List<CouponExpirationCandidate> candidates =
+                repository.findDueIssues(cutoffAt, chunkSize, couponId);
+        return expireCandidates(candidates, cutoffAt);
+    }
+
+    private int expireCandidates(List<CouponExpirationCandidate> candidates, LocalDateTime cutoffAt) {
         int[] updateCounts = repository.markExpiredBatch(candidates, cutoffAt);
         List<CouponExpirationCandidate> expiredCandidates = new ArrayList<>();
 

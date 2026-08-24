@@ -19,13 +19,53 @@ DB는 EC2의 `docker compose` MySQL 컨테이너 안에서 직접 실행한다. 
 
 - EC2 전용 테스트 서버에 SSH 접속
 - 해당 디렉터리를 포함한 배포 브랜치가 서버에 있음
-- app을 `perf` 프로필로 실행했고, `mocou.perf.expiration-control-enabled=true`
-- `mocou.lifecycle.expiration.scheduler-enabled=false`
+- 기존 Compose용 `.env`에 `MYSQL_APP_PASSWORD`, `MYSQL_ROOT_PASSWORD`가 설정됨
 - 서버에 `docker`, `curl`, `jq`, `k6`, `tar`가 설치됨
+
+앱은 저장소 루트에서 아래 명령으로 시작한다. `docker-compose.perf.yml`이 `perf` 프로필, 만료 Batch 수동 제어 활성화, 자동 Scheduler 비활성화를 테스트 컨테이너에만 적용한다. `.env`는 Compose가 MySQL 컨테이너와 앱의 DB 연결에 쓰며, 부하 테스트 스크립트가 비밀번호를 직접 읽거나 새로 만들지는 않는다.
+
+```bash
+docker compose \
+  -f docker-compose.prod.yml \
+  -f docker-compose.perf.yml \
+  up -d --force-recreate app
+```
+
+앱 이미지에는 이 브랜치의 코드가 배포돼 있어야 한다. 기동 후 다음 명령이 `true`, `false`를 각각 반환하는지 확인한다.
+
+```bash
+curl --fail --silent http://localhost:8080/internal/perf/expiration-jobs/capabilities \
+  | jq '.data | {controlEnabled, schedulerEnabled}'
+```
+
+예상 결과:
+
+```json
+{
+  "controlEnabled": true,
+  "schedulerEnabled": false
+}
+```
 
 스크립트는 실행 전에 health, capability, Scheduler 비활성, MySQL 접속, 필수 도구를 자동으로 확인한다. 하나라도 실패하면 부하·데이터 변경 전에 종료한다. 입력한 청크 크기도 capability가 반환한 허용 범위 안인지 데이터 준비 전에 확인한다.
 
 정상 실행의 종료 코드는 `0`이다. 종료 코드가 `0`이 아니면 테스트 담당자는 결과를 해석하거나 임의로 재실행하지 않고, 출력된 `RESULT_FILE`과 `ARTIFACT_BUNDLE`을 결과 검토자에게 함께 전달한다. Batch 시작·대기 실패 시에도 스크립트는 실행 중인 k6를 종료하고 테스트 데이터(알림 포함)를 정리한 뒤 실패한다.
+
+## 테스트 시작 관문
+
+본 부하 테스트 전에 아래 두 명령을 순서대로 실행한다.
+
+```bash
+# 1. 읽기 전용 환경 점검: 앱, perf 제어 API, MySQL 연결, 필수 도구를 확인한다.
+./load-test/expiration/run-expiration-test.sh --dry-run
+
+# 2. 실제 동작 점검: 고유 테스트 데이터 10건을 생성·만료·검증·정리한다.
+./load-test/expiration/run-expiration-test.sh --scenario smoke
+```
+
+`--dry-run`은 데이터를 생성하거나 변경하지 않는다. `smoke`는 `PERF-EXPIRATION-*` 접두어의 쿠폰·회원·발급 이력 10건만 만들고, 그 쿠폰 ID를 perf Job에 범위로 전달한다. 따라서 같은 DB의 다른 만료 대상은 조회·변경하지 않는다. smoke는 `COMPLETED`, `EXPIRED=10`, 상태·이력 불일치 0건, `USED` 알림 0건을 확인한 뒤 그 데이터만 삭제한다. 둘 중 하나라도 종료 코드 `0`이 아니면 본 부하 테스트를 시작하지 않는다.
+
+`compare-chunks`와 `race`는 시작할 때 `--dry-run`과 동일한 읽기 전용 사전 점검을 다시 통과한 뒤, 같은 smoke 관문을 자동으로 한 번 실행한다. 즉 두 관문이 모두 통과해야 본 부하 데이터 생성이 시작된다. 두 본 시나리오도 자신이 생성한 쿠폰 ID만 perf Job에 전달하므로 다른 쿠폰의 만료 상태·이력에는 영향을 주지 않는다. 따라서 수동 점검을 통과한 뒤 환경이 바뀌었으면 본 테스트가 시작되지 않는다.
 
 ## 1단계 — A·C 청크 비교
 

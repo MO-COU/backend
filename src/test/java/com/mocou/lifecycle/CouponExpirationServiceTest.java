@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class CouponExpirationServiceTest {
 
     private static final LocalDateTime CUTOFF_AT = LocalDateTime.of(2026, 8, 18, 18, 0);
+    private static final long SCOPED_COUPON_ID = 99L;
     private static final CouponExpirationCandidate DUE_ISSUE =
             new CouponExpirationCandidate(42L, LocalDateTime.of(2026, 8, 18, 17, 0));
     private static final CouponExpirationCandidate CONCURRENTLY_USED_ISSUE =
@@ -69,5 +70,21 @@ class CouponExpirationServiceTest {
         // then
         assertThat(selectedCount).isEqualTo(2);
         verify(repository).saveExpiredHistories(List.of(DUE_ISSUE));
+    }
+
+    @Test
+    @DisplayName("지정한 쿠폰 범위의 만료 후보만 처리한다")
+    void expiresOnlyCandidatesForScopedCoupon() {
+        // given
+        given(repository.findDueIssues(CUTOFF_AT, 1, SCOPED_COUPON_ID))
+                .willReturn(List.of(DUE_ISSUE));
+        given(repository.markExpiredBatch(List.of(DUE_ISSUE), CUTOFF_AT)).willReturn(new int[] {1});
+
+        // when
+        int selectedCount = service.expireDueIssues(CUTOFF_AT, 1, SCOPED_COUPON_ID);
+
+        // then
+        assertThat(selectedCount).isEqualTo(1);
+        verify(repository).findDueIssues(CUTOFF_AT, 1, SCOPED_COUPON_ID);
     }
 }

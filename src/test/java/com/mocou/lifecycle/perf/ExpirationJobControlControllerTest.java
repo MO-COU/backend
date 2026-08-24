@@ -1,6 +1,7 @@
 package com.mocou.lifecycle.perf;
 
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -42,7 +43,7 @@ class ExpirationJobControlControllerTest {
     @Test
     @DisplayName("유효한 시작 요청은 Job 완료를 기다리지 않고 202를 반환한다")
     void acceptsJobSubmission() throws Exception {
-        given(service.submit("perf-run-1", 2000))
+        given(service.submit("perf-run-1", 2000, null))
                 .willReturn(
                         new ExpirationJobRunSnapshot(
                                 "perf-run-1",
@@ -67,10 +68,39 @@ class ExpirationJobControlControllerTest {
     }
 
     @Test
+    @DisplayName("유효한 쿠폰 범위는 perf Job 제출 요청에 전달한다")
+    void acceptsCouponScopedJobSubmission() throws Exception {
+        // given
+        given(service.submit("perf-run-4", 10, 2001L))
+                .willReturn(
+                        new ExpirationJobRunSnapshot(
+                                "perf-run-4",
+                                10,
+                                ExpirationJobRunStatus.SUBMITTED,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                java.util.List.of()));
+
+        // when
+        mockMvc.perform(
+                        post("/internal/perf/expiration-jobs")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"runKey\":\"perf-run-4\",\"chunkSize\":10,\"couponId\":2001}"))
+                .andExpect(status().isAccepted());
+
+        // then
+        verify(service).submit("perf-run-4", 10, 2001L);
+    }
+
+    @Test
     @DisplayName("이미 실행 중인 Job 요청은 409와 원인을 반환한다")
     void returnsConflictWhenJobIsAlreadyRunning() throws Exception {
         // given
-        given(service.submit("perf-run-2", 2000))
+        given(service.submit("perf-run-2", 2000, null))
                 .willThrow(new IllegalStateException("JOB_ALREADY_RUNNING"));
 
         // when, then
@@ -87,7 +117,7 @@ class ExpirationJobControlControllerTest {
     @DisplayName("실행기 제출 실패는 503과 원인을 반환한다")
     void returnsServiceUnavailableWhenExecutorRejectsSubmission() throws Exception {
         // given
-        given(service.submit("perf-run-3", 2000))
+        given(service.submit("perf-run-3", 2000, null))
                 .willThrow(new IllegalStateException("EXECUTOR_UNAVAILABLE"));
 
         // when, then

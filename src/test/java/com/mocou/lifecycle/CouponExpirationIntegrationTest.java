@@ -124,6 +124,48 @@ class CouponExpirationIntegrationTest extends CouponLifecycleIntegrationTestSupp
     }
 
     @Test
+    @DisplayName("쿠폰 범위를 지정하면 다른 쿠폰의 만료 후보는 조회하지 않는다")
+    void findsDueIssuesOnlyForRequestedCoupon() {
+        // given
+        insertIssuedCoupon(ISSUE_ID);
+        jdbcTemplate.update(
+                "UPDATE coupon_issue SET expires_at = ? WHERE coupon_issue_id = ?",
+                LocalDateTime.of(2026, 8, 18, 17, 0),
+                ISSUE_ID);
+        jdbcTemplate.update(
+                "INSERT INTO member (member_id, email, name, phone) VALUES (?, ?, ?, ?)",
+                1002L,
+                "other-member@example.com",
+                "다른 회원",
+                "01000000001");
+        jdbcTemplate.update(
+                "INSERT INTO coupon (coupon_id, name, open_at, close_at, status) "
+                        + "VALUES (?, ?, CURRENT_TIMESTAMP - INTERVAL 1 DAY, "
+                        + "CURRENT_TIMESTAMP + INTERVAL 1 DAY, ?)",
+                2002L,
+                "다른 쿠폰",
+                "OPEN");
+        jdbcTemplate.update(
+                "INSERT INTO coupon_issue "
+                        + "(coupon_issue_id, coupon_id, member_id, status, issued_at, expires_at) "
+                        + "VALUES (?, ?, ?, 'ISSUED', ?, ?)",
+                3002L,
+                2002L,
+                1002L,
+                LocalDateTime.of(2026, 8, 4, 16, 0),
+                LocalDateTime.of(2026, 8, 18, 16, 0));
+
+        // when
+        List<CouponExpirationCandidate> candidates =
+                repository.findDueIssues(LocalDateTime.of(2026, 8, 18, 18, 0), 10, FIXTURE_COUPON_ID);
+
+        // then
+        assertThat(candidates)
+                .extracting(CouponExpirationCandidate::couponIssueId)
+                .containsExactly(ISSUE_ID);
+    }
+
+    @Test
     @DisplayName("사용 요청과 만료 처리의 경쟁에서도 전이 상태와 이력이 하나만 남는다")
     void keepsOneConsistentTransitionWhenUseAndExpirationRace() throws Exception {
         // given

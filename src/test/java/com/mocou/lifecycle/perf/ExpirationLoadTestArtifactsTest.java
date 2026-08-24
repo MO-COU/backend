@@ -74,4 +74,71 @@ class ExpirationLoadTestArtifactsTest {
         assertThat(script).contains("kill -INT \"$k6_pid\" 2>/dev/null || true");
         assertThat(script).contains("mysql_file \"$SCRIPT_DIR/sql/cleanup.sql\" \"$run_key\" 0 >/dev/null");
     }
+
+    @Test
+    @DisplayName("dry-run은 데이터 변경 없이 사전 점검만 수행한다")
+    void supportsReadOnlyDryRun() throws IOException {
+        // given
+        String script = Files.readString(LOAD_TEST_DIR.resolve("run-expiration-test.sh"));
+
+        // when, then
+        assertThat(script).contains("--dry-run");
+        assertThat(script).contains("DRY_RUN=PASS");
+        assertThat(script).contains("if [[ \"$dry_run\" == \"true\" ]]; then");
+    }
+
+    @Test
+    @DisplayName("본 부하 테스트는 10건 smoke 검증을 통과한 뒤에만 시작한다")
+    void runsSmokeGateBeforeLoadScenarios() throws IOException {
+        // given
+        String script = Files.readString(LOAD_TEST_DIR.resolve("run-expiration-test.sh"));
+
+        // when, then
+        assertThat(script).contains("SMOKE_BATCH_COUNT=10");
+        assertThat(script).contains("validate_chunk_size \"$SMOKE_BATCH_COUNT\"");
+        assertThat(script).contains("run_smoke");
+        assertThat(script).contains("SMOKE=PASS");
+        assertThat(script).contains("run_smoke || exit 1");
+        assertThat(script).contains("start_expiration_job \"$run_key\" \"$SMOKE_BATCH_COUNT\" \"$(cat \"$raw_dir/coupon-id.txt\")\"");
+    }
+
+    @Test
+    @DisplayName("smoke 데이터 준비 실패도 정리 경로로 반환한다")
+    void returnsPreparationFailureSoSmokeCanCleanUp() throws IOException {
+        // given
+        String script = Files.readString(LOAD_TEST_DIR.resolve("run-expiration-test.sh"));
+
+        // when, then
+        assertThat(script).contains("[[ -s \"$raw_dir/coupon-id.txt\" ]] || return 1");
+        assertThat(script).contains("if ! prepare_batch_data \"$run_key\" \"$raw_dir\" \"$SMOKE_BATCH_COUNT\"; then");
+    }
+
+    @Test
+    @DisplayName("실행 중 어느 단계가 실패해도 시나리오별 테스트 데이터와 k6를 정리한다")
+    void cleansUpEachScenarioWhenAnyPostPreparationStepFails() throws IOException {
+        // given
+        String script = Files.readString(LOAD_TEST_DIR.resolve("run-expiration-test.sh"));
+
+        // when, then
+        assertThat(script).contains("trap cleanup_batch_only EXIT");
+        assertThat(script).contains("trap cleanup_race EXIT");
+        assertThat(script).contains("trap cleanup_sustained EXIT");
+        assertThat(script).contains("trap cleanup_smoke EXIT");
+        assertThat(script).contains("mysql_file \"$SCRIPT_DIR/sql/cleanup.sql\" \"$run_key\" 0 >/dev/null || cleanup_status=$?");
+        assertThat(script).contains("k6_pid=\"\"");
+    }
+
+    @Test
+    @DisplayName("격리된 시나리오에서 기록된 FAIL도 부모 스크립트의 실패 종료 코드에 반영한다")
+    void propagatesScenarioVerificationFailuresFromSubshells() throws IOException {
+        // given
+        String script = Files.readString(LOAD_TEST_DIR.resolve("run-expiration-test.sh"));
+
+        // when, then
+        assertThat(script).contains("if [[ \"$result\" == \"PASS\" ]]; then");
+        assertThat(script).contains("has_failures=1\n  return 1");
+        assertThat(script).contains("do run_batch_only \"$chunk\" \"$iteration\" \"$((iteration >= warmups))\"; done");
+        assertThat(script).contains("do run_sustained \"$chunk\" \"$iteration\"; done");
+        assertThat(script).contains("do run_race \"$iteration\"; done");
+    }
 }

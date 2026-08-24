@@ -1,0 +1,7 @@
+# EC2 성능 테스트 전용 오버라이드. docker-compose.prod.yml과 함께 사용한다.
+services:
+  app:
+    environment:
+      SPRING_PROFILES_ACTIVE: perf
+      MOCOU_PERF_EXPIRATION_CONTROL_ENABLED: "true"
+      MOCOU_LIFECYCLE_EXPIRATION_SCHEDULER_ENABLED: "false"

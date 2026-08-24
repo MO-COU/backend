@@ -25,6 +25,7 @@ import org.springframework.batch.core.repository.JobRepository;
 class ExpirationJobControlServiceTest {
 
     private static final LocalDateTime DATABASE_TIME = LocalDateTime.of(2026, 8, 21, 10, 0);
+    private static final long SCOPED_COUPON_ID = 99L;
 
     @Mock private JobOperator jobOperator;
     @Mock private JobRepository jobRepository;
@@ -115,5 +116,33 @@ class ExpirationJobControlServiceTest {
         ExpirationJobRunSnapshot snapshot = service.find("failed-batch-run");
         assertThat(snapshot.status()).isEqualTo(ExpirationJobRunStatus.FAILED);
         assertThat(snapshot.failureReason()).isEqualTo("BATCH_STATUS_FAILED");
+    }
+
+    @Test
+    @DisplayName("perf 실행은 지정한 쿠폰 ID를 Batch 파라미터로 전달한다")
+    void passesScopedCouponIdToBatchJob() throws Exception {
+        // given
+        given(jobRepository.findRunningJobExecutions("couponExpirationJob")).willReturn(Set.of());
+        given(expirationClock.now()).willReturn(DATABASE_TIME);
+        given(jobOperator.start(eq(couponExpirationJob), org.mockito.ArgumentMatchers.any(JobParameters.class)))
+                .willReturn(jobExecution);
+        given(jobExecution.getId()).willReturn(43L);
+        given(jobExecution.getStatus()).willReturn(BatchStatus.COMPLETED);
+        ExpirationJobControlService service =
+                new ExpirationJobControlService(
+                        jobOperator,
+                        jobRepository,
+                        couponExpirationJob,
+                        expirationClock,
+                        new ExpirationJobRunRegistry(),
+                        Runnable::run);
+        ArgumentCaptor<JobParameters> parametersCaptor = ArgumentCaptor.forClass(JobParameters.class);
+
+        // when
+        service.submit("scoped-run", 10, SCOPED_COUPON_ID);
+
+        // then
+        verify(jobOperator).start(eq(couponExpirationJob), parametersCaptor.capture());
+        assertThat(parametersCaptor.getValue().getLong("couponId")).isEqualTo(SCOPED_COUPON_ID);
     }
 }

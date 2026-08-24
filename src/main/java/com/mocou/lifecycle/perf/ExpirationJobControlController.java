@@ -38,7 +38,12 @@ public class ExpirationJobControlController {
             @Valid @RequestBody ExpirationJobControlRequest request) {
         try {
             return ResponseEntity.status(HttpStatus.ACCEPTED)
-                    .body(ApiResponse.success(service.submit(request.runKey(), request.chunkSize())));
+                    .body(
+                            ApiResponse.success(
+                                    service.submit(
+                                            request.runKey(),
+                                            request.chunkSize(),
+                                            request.couponId())));
         } catch (IllegalStateException exception) {
             String reason = exception.getMessage();
             HttpStatus status = "EXECUTOR_UNAVAILABLE".equals(reason)
