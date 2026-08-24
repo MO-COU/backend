@@ -145,6 +145,19 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("같은 멱등성 키로 재시도해도 사용 알림을 중복 기록하지 않는다")
+    void doesNotDuplicateNotificationForSameKeyRetry() {
+        insertIssuedCoupon(ISSUE_ID);
+
+        CouponUseResult firstResult = service.use(ISSUE_ID, "same-key-retry");
+        CouponUseResult retriedResult = service.use(ISSUE_ID, "same-key-retry");
+
+        assertThat(retriedResult).isEqualTo(firstResult);
+        assertThat(usedHistoryCount(ISSUE_ID)).isEqualTo(1);
+        assertThat(usedNotificationCount()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("DB 정렬 규칙 충돌은 멱등성 충돌로 반환한다")
     void mapsCollationEquivalentHistoryKeyCollisionToConflict() {
         insertIssuedCoupon(ISSUE_ID);
