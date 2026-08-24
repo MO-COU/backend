@@ -31,6 +31,7 @@ public class LoadTestResetService {
     private final CouponRedisInitializationService redisInitializationService;
     private final StringRedisTemplate redisTemplate;
     private final TransactionTemplate transactionTemplate;
+    private final RedisCouponIssueSyncGateway syncGateway;
 
     /**
      * 되돌린다.
@@ -156,6 +157,8 @@ public class LoadTestResetService {
      *
      * <p>{@code datagen}은 {@code ALREADY_INITIALIZED}를 정상으로 보지만 여기서는 아니다. 바로 앞에서 키를
      * 지웠으므로 새로 세워졌어야 한다. 그 값이 나왔다면 삭제가 되지 않은 것이다.
+     *
+     * <p>재고와 함께 컨슈머 그룹도 되살린다. 이유는 아래에 적었다.
      */
     private void initializeRedis(long couponId) {
         CouponRedisInitializationResult result = redisInitializationService.initialize(couponId);
@@ -163,5 +166,29 @@ public class LoadTestResetService {
             throw new IllegalStateException(
                     "리셋 후 Redis 초기화가 예상과 다르다. couponId=%d, result=%s".formatted(couponId, result));
         }
+
+        restoreConsumerGroup(couponId);
+    }
+
+    /**
+     * 발급 이벤트를 읽는 컨슈머 그룹을 되살린다.
+     *
+     * <p>위에서 {@code issue-stream} 키를 지우면 <b>컨슈머 그룹도 함께 사라진다.</b> 그런데 컨슈머는 그룹을 만들었다는
+     * 사실을 자기 메모리에 들고 있어 다시 만들지 않는다.
+     *
+     * <pre>
+     * 리셋      issue-stream 삭제 → 그룹도 사라짐
+     * 부하 테스트 스트림에 이벤트가 쌓임
+     * 컨슈머     "이미 만들어놨다" → 생성 건너뜀
+     * 결과      XREADGROUP이 NOGROUP만 내고 한 건도 DB로 넘어가지 않는다
+     * </pre>
+     *
+     * <p>실제로 이 상태에서 발급 10,000건이 스트림에 쌓인 채 멈췄고, 앱을 재시작해서야 풀렸다. <b>이 호출을 지우면 그 상황이
+     * 그대로 재현된다.</b>
+     *
+     * <p>이미 있으면 아무 일도 하지 않는 멱등 연산이라 리셋을 두 번 불러도 안전하다.
+     */
+    private void restoreConsumerGroup(long couponId) {
+        syncGateway.ensureConsumerGroup(couponId);
     }
 }
