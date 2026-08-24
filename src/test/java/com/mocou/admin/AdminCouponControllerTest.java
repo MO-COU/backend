@@ -96,6 +96,8 @@ class AdminCouponControllerTest {
                 .andExpect(jsonPath("$.data.openAt").value("2026-08-17T10:00:00"))
                 .andExpect(jsonPath("$.data.totalQuantity").value(10_000))
                 .andExpect(jsonPath("$.data.issuedQuantity").value(8_000))
+                .andExpect(jsonPath("$.data.dbIssuedQuantity").value(8_000))
+                .andExpect(jsonPath("$.data.syncGapQuantity").value(0))
                 .andExpect(jsonPath("$.data.remainingQuantity").value(2_000))
                 .andExpect(jsonPath("$.data.status").value("OPEN"))
                 .andExpect(jsonPath("$.data.updatedAt").value("2026-08-19T15:00:00"));

@@ -33,6 +33,7 @@ public enum ErrorCode {
     NOT_MEMBER(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다"),
 
     // 정합성 검증
+    VERIFICATION_RUN_NOT_FOUND(HttpStatus.NOT_FOUND, "정합성 검증 결과를 찾을 수 없습니다"),
     // 검증은 300만 건을 훑느라 오래 걸린다. 같은 검증을 겹쳐 돌리면 DB만 두 배로 바쁘고
     // 결과 행도 둘로 갈리므로, 진행 중인 실행이 있으면 새 요청을 받지 않는다.
     VERIFICATION_ALREADY_RUNNING(HttpStatus.CONFLICT, "이미 진행 중인 정합성 검증이 있습니다"),

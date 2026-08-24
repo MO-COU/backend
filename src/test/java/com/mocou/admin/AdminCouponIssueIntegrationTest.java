@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringBootTest(properties = "spring.batch.jdbc.initialize-schema=never")
 class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
@@ -15,6 +16,7 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
     private static final long COUPON_ID = 2001L;
 
     @Autowired private AdminCouponService service;
+    @MockitoBean private AdminCouponRealtimeStockRepository realtimeStockRepository;
 
     @Test
     @DisplayName("MySQL에 적재된 쿠폰 발급 이력을 최신순으로 조회한다")
@@ -56,6 +58,8 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
         assertThat(result.openAt()).isNotNull();
         assertThat(result.totalQuantity()).isEqualTo(10_000);
         assertThat(result.issuedQuantity()).isEqualTo(8_000);
+        assertThat(result.dbIssuedQuantity()).isZero();
+        assertThat(result.syncGapQuantity()).isEqualTo(8_000);
         assertThat(result.remainingQuantity()).isEqualTo(2_000);
         assertThat(result.updatedAt()).isNotNull();
     }

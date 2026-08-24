@@ -24,6 +24,7 @@ class AdminCouponServiceTest {
     private static final long COUPON_ID = 10L;
 
     @Mock private AdminCouponRepository repository;
+    @Mock private AdminCouponRealtimeStockRepository realtimeStockRepository;
     @InjectMocks private AdminCouponService service;
 
     @Test
@@ -57,7 +58,7 @@ class AdminCouponServiceTest {
     }
 
     @Test
-    @DisplayName("DB에 반영된 쿠폰 재고와 갱신 시각을 조회한다")
+    @DisplayName("Redis가 초기화되지 않았으면 DB에 반영된 쿠폰 재고를 조회한다")
     void returnsCouponStock() {
         // given
         AdminCouponStock stock =
@@ -71,12 +72,69 @@ class AdminCouponServiceTest {
                         "OPEN",
                         LocalDateTime.of(2026, 8, 19, 15, 0));
         given(repository.findStock(COUPON_ID)).willReturn(Optional.of(stock));
+        given(repository.countIssues(COUPON_ID)).willReturn(8_000L);
 
         // when
         AdminCouponStock result = service.getStock(COUPON_ID);
 
         // then
         assertThat(result).isEqualTo(stock);
+    }
+
+    @Test
+    @DisplayName("Redis가 초기화됐으면 실시간 잔여 재고를 우선 조회한다")
+    void returnsRealtimeCouponStock() {
+        // given
+        AdminCouponStock databaseStock =
+                new AdminCouponStock(
+                        COUPON_ID,
+                        "8월 3주차 선착순 쿠폰",
+                        LocalDateTime.of(2026, 8, 17, 10, 0),
+                        10_000,
+                        8_000,
+                        2_000,
+                        "OPEN",
+                        LocalDateTime.of(2026, 8, 19, 15, 0));
+        given(repository.findStock(COUPON_ID)).willReturn(Optional.of(databaseStock));
+        given(repository.countIssues(COUPON_ID)).willReturn(7_990L);
+        given(realtimeStockRepository.findRemainingQuantity(COUPON_ID))
+                .willReturn(java.util.OptionalInt.of(1_990));
+
+        // when
+        AdminCouponStock result = service.getStock(COUPON_ID);
+
+        // then
+        assertThat(result.totalQuantity()).isEqualTo(10_000);
+        assertThat(result.issuedQuantity()).isEqualTo(8_010);
+        assertThat(result.dbIssuedQuantity()).isEqualTo(7_990);
+        assertThat(result.syncGapQuantity()).isEqualTo(20);
+        assertThat(result.remainingQuantity()).isEqualTo(1_990);
+    }
+
+    @Test
+    @DisplayName("Redis 잔여 재고가 총 재고보다 크면 조회를 거부한다")
+    void rejectsInconsistentRealtimeCouponStock() {
+        AdminCouponStock databaseStock =
+                new AdminCouponStock(
+                        COUPON_ID,
+                        "8월 3주차 선착순 쿠폰",
+                        LocalDateTime.of(2026, 8, 17, 10, 0),
+                        10_000,
+                        0,
+                        10_000,
+                        "OPEN",
+                        LocalDateTime.of(2026, 8, 19, 15, 0));
+        given(repository.findStock(COUPON_ID)).willReturn(Optional.of(databaseStock));
+        given(repository.countIssues(COUPON_ID)).willReturn(0L);
+        given(realtimeStockRepository.findRemainingQuantity(COUPON_ID))
+                .willReturn(java.util.OptionalInt.of(10_001));
+
+        assertThatThrownBy(() -> service.getStock(COUPON_ID))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.SERVICE_UNAVAILABLE));
     }
 
     @Test
