@@ -141,4 +141,18 @@ class ExpirationLoadTestArtifactsTest {
         assertThat(script).contains("do run_sustained \"$chunk\" \"$iteration\"; done");
         assertThat(script).contains("do run_race \"$iteration\"; done");
     }
+
+    @Test
+    @DisplayName("만료 부하 테스트 준비 SQL은 최신 쿠폰 스키마의 컬럼만 사용한다")
+    void preparesCouponsWithoutDroppedDiscountRateColumn() throws IOException {
+        // given
+        String batchSql = Files.readString(LOAD_TEST_DIR.resolve("sql/prepare-batch-only.sql"));
+        String raceSql = Files.readString(LOAD_TEST_DIR.resolve("sql/prepare-race.sql"));
+
+        // when, then
+        assertThat(batchSql).doesNotContain("discount_rate");
+        assertThat(raceSql).doesNotContain("discount_rate");
+        assertThat(batchSql).contains("INSERT INTO coupon (name, open_at, close_at, status)");
+        assertThat(raceSql).contains("INSERT INTO coupon (name, open_at, close_at, status)");
+    }
 }
