@@ -10,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.RedisStreamCommands.XClaimOptions;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.PendingMessagesSummary;
@@ -24,6 +25,7 @@ import com.mocou.notification.NotificationSender;
 import com.mocou.notification.NotificationType;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -242,8 +244,54 @@ class CouponIssueSyncConsumerIntegrationTest
         assertThat(redisTemplate.opsForStream().size(issueStreamKey())).isZero();
     }
 
+    // Redis 초기화(FLUSHALL/재시작 등)로 컨슈머 그룹이 사라져도, groupEnsuredForCouponId
+    // 캐시는 여전히 "이미 만들었다"고 믿는다. 그 상태에서 실제 Redis 명령이 NOGROUP으로
+    // 실패하면 캐시를 무효화해서 다음 tick에 스스로 그룹을 재생성하는지 검증한다.
     @Test
-    @DisplayName("consume()를 여러 번 호출해도 open 쿠폰 목록은 최초 1번만 DB에서 조회한다")
+    @DisplayName("컨슈머 그룹이 외부에서 사라지면 다음 tick에 스스로 재생성해 복구한다")
+    void recoversAfterConsumerGroupIsDeletedExternally() {
+        // given
+        CouponIssueSyncProperties properties = properties(1, 5_000);
+        CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
+                redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+        given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
+        consumer.initOpenCouponIds();
+        given(repository.saveBatch(anyLong(), anyList()))
+                .willAnswer(invocation -> invocation.getArgument(1));
+
+        // 정상적으로 한 번 처리해서 컨슈머 내부 캐시(그룹을 이미 만들었다는 것)를 채운다.
+        addEvent("event-1", 100L, 1L);
+        consumer.consume();
+        verify(repository).saveBatch(eq(COUPON_ID), anyList());
+
+        // Redis 초기화로 그룹만 사라진 상황을 재현한다 (캐시는 여전히 "있다"고 믿는 상태).
+        redisTemplate.<String, String>opsForStream()
+                .destroyGroup(issueStreamKey(), RedisCouponIssueSyncGateway.GROUP_NAME);
+        addEvent("event-2", 101L, 2L);
+
+        // when, then
+        // 캐시를 그대로 믿고 그룹을 재생성하지 않아 첫 시도는 NOGROUP으로 실패한다.
+        assertThatThrownBy(consumer::consume).isInstanceOf(RedisSystemException.class);
+
+        // 캐시가 무효화됐으니 다음 tick엔 그룹을 다시 만들고 정상 처리된다.
+        consumer.consume();
+
+        // then
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CouponIssueSyncEvent>> captor = ArgumentCaptor.forClass(List.class);
+        verify(repository, times(2)).saveBatch(eq(COUPON_ID), captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(list -> list.getFirst().memberId())
+                .containsExactly(100L, 101L);
+        // initOpenCouponIds() 1회 + 최초 그룹 생성 1회 + 복구 시 그룹 재생성 1회 = 3회.
+        // openCouponIds 캐시가 이벤트 유실 등으로 stale해졌을 가능성까지 이 순간에 같이 회복한다.
+        verify(repository, times(3)).findOpenCouponIds();
+    }
+
+    // 그룹 생성 시점(최초 1회)에 한 번 더 조회하는 건 의도한 동작이다 - 그룹이 실제로
+    // 캐시 밖에서 다시 만들어지지 않는 이상, 매 tick DB를 두드리진 않는다는 게 이 테스트의 핵심.
+    @Test
+    @DisplayName("consume()를 여러 번 호출해도 그룹 생성 이후엔 open 쿠폰 목록을 추가로 조회하지 않는다")
     void queriesOpenCouponIdsOnlyOnceAcrossMultipleConsumeCalls() {
         // given
         CouponIssueSyncProperties properties = properties(100, 5_000);
@@ -253,13 +301,14 @@ class CouponIssueSyncConsumerIntegrationTest
         consumer.initOpenCouponIds();
 
         // when
-        // 10ms 간격으로 반복 호출되는 실제 상황을 재현 — 매번 DB를 조회하면 안 된다.
+        // 10ms 간격으로 반복 호출되는 실제 상황을 재현 — 그룹이 이미 있으면 매번 DB를 조회하면 안 된다.
         consumer.consume();
         consumer.consume();
         consumer.consume();
 
         // then
-        verify(repository, times(1)).findOpenCouponIds();
+        // initOpenCouponIds()에서 1번 + 최초 그룹 생성 시점에 1번, 이후로는 추가 조회 없음.
+        verify(repository, times(2)).findOpenCouponIds();
     }
 
     @Test
