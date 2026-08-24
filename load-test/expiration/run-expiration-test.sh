@@ -118,7 +118,11 @@ append_batch_result() {
 }
 
 run_batch_only() (
-  local chunk="$1" repeat="$2" record_result="$3" raw_dir="$result_dir/raw/batch-only-$chunk-$repeat" run_key="${run_id}-a-${chunk}-${repeat}"
+  local chunk="$1"
+  local repeat="$2"
+  local record_result="$3"
+  local raw_dir="$result_dir/raw/batch-only-$chunk-$repeat"
+  local run_key="${run_id}-a-${chunk}-${repeat}"
   cleanup_batch_only() {
     local exit_code=$? cleanup_status=0
     mysql_file "$SCRIPT_DIR/sql/cleanup.sql" "$run_key" 0 >/dev/null || cleanup_status=$?
@@ -143,7 +147,9 @@ run_batch_only() (
 )
 
 run_race() (
-  local repeat="$1" raw_dir="$result_dir/raw/race-$chunk_size-$repeat" run_key="${run_id}-b-${chunk_size}-${repeat}"
+  local repeat="$1"
+  local raw_dir="$result_dir/raw/race-$chunk_size-$repeat"
+  local run_key="${run_id}-b-${chunk_size}-${repeat}"
   local k6_pid=""
   cleanup_race() {
     local exit_code=$? cleanup_status=0
@@ -189,7 +195,10 @@ run_race() (
 )
 
 run_sustained() (
-  local chunk="$1" repeat="$2" raw_dir="$result_dir/raw/sustained-$chunk-$repeat" run_key="${run_id}-c-${chunk}-${repeat}"
+  local chunk="$1"
+  local repeat="$2"
+  local raw_dir="$result_dir/raw/sustained-$chunk-$repeat"
+  local run_key="${run_id}-c-${chunk}-${repeat}"
   local k6_pid=""
   cleanup_sustained() {
     local exit_code=$? cleanup_status=0

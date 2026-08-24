@@ -155,4 +155,16 @@ class ExpirationLoadTestArtifactsTest {
         assertThat(batchSql).contains("INSERT INTO coupon (name, open_at, close_at, status)");
         assertThat(raceSql).contains("INSERT INTO coupon (name, open_at, close_at, status)");
     }
+
+    @Test
+    @DisplayName("실행 경로에 쓰는 인자는 set -u 환경에서 먼저 초기화한다")
+    void initializesScenarioArgumentsBeforeBuildingRunPaths() throws IOException {
+        // given
+        String script = Files.readString(LOAD_TEST_DIR.resolve("run-expiration-test.sh"));
+
+        // when, then
+        assertThat(script).contains("local chunk=\"$1\"\n  local repeat=\"$2\"\n  local record_result=\"$3\"");
+        assertThat(script).contains("local repeat=\"$1\"\n  local raw_dir=\"$result_dir/raw/race-$chunk_size-$repeat\"");
+        assertThat(script).contains("local chunk=\"$1\"\n  local repeat=\"$2\"\n  local raw_dir=\"$result_dir/raw/sustained-$chunk-$repeat\"");
+    }
 }
