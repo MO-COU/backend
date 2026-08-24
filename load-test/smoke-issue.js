@@ -12,6 +12,10 @@ const TARGET = __ENV.TARGET || 'http://localhost:8080';
 const COUPON_ID = __ENV.COUPON_ID || '301';
 const VUS = Number(__ENV.VUS || '10');
 
+if (!Number.isInteger(VUS) || VUS <= 0) {
+  throw new Error(`VUS는 양의 정수여야 합니다: ${__ENV.VUS}`);
+}
+
 // 품절이나 중복으로 받은 409는 서버 장애가 아니라 정상적인 발급 거절이다.
 http.setResponseCallback(
   http.expectedStatuses(202, 409)
@@ -20,8 +24,7 @@ http.setResponseCallback(
 export const options = {
   scenarios: {
     smoke: {
-      // 본 테스트 전에 API 주소와 응답 형식만 빠르게 확인한다.
-      // 각 VU가 한 번씩만 요청하므로 기본값 기준 총 10건이 전송된다.
+      // 본 테스트 전에 소량으로 확인한다.
       executor: 'per-vu-iterations',
       vus: VUS,
       iterations: 1,
@@ -33,6 +36,9 @@ export const options = {
     http_req_duration: ['p(95)<1000'],
     http_req_failed: ['rate<0.01'],
     checks: ['rate==1'],
+    smoke_success_202: [`count==${VUS}`],
+    smoke_duplicate_409: ['count==0'],
+    smoke_sold_out_409: ['count==0'],
     smoke_system_error_5xx: ['count==0'],
     smoke_other_error: ['count==0'],
   },
@@ -40,7 +46,7 @@ export const options = {
 
 export default function () {
   const memberIdStart = Number(__ENV.MEMBER_ID_START || '1');
-  // VU마다 다른 회원 ID를 사용해서 스모크 테스트 자체가 중복 요청이 되지 않게 한다.
+  // 회원 ID가 겹치지 않게 한다.
   const memberId = memberIdStart + __VU - 1;
 
   const url = `${TARGET}/api/coupons/${COUPON_ID}/issues`;
@@ -73,7 +79,7 @@ export default function () {
   }
 
   try {
-    // 공통 ApiResponse의 error.code를 기준으로 거절 사유를 나눠서 집계한다.
+    // 거절 사유를 나눠서 센다.
     const errorCode = res.json('error.code');
     if (errorCode === 'DUPLICATE') {
       duplicate409.add(1);

@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 
 // 커스텀 지표 정의
@@ -13,10 +14,37 @@ const TARGET = __ENV.TARGET || 'http://localhost:8080';
 const COUPON_ID = __ENV.COUPON_ID || '301';
 const RAMP_UP = __ENV.RAMP_UP || '60s';
 const VUS = Number(__ENV.VUS || '20000');
+const EXPECTED_STOCK = Number(__ENV.EXPECTED_STOCK || '10000');
+const WORKER_VUS = Number(__ENV.WORKER_VUS || String(Math.min(VUS, 500)));
+
+function durationSeconds(duration) {
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(duration);
+  if (!match) {
+    throw new Error(`RAMP_UP 형식이 올바르지 않습니다: ${duration}`);
+  }
+
+  const value = Number(match[1]);
+  const unitSeconds = { ms: 0.001, s: 1, m: 60, h: 3600 };
+  return value * unitSeconds[match[2]];
+}
 
 if (!Number.isInteger(VUS) || VUS <= 0) {
   throw new Error(`VUS는 양의 정수여야 합니다: ${__ENV.VUS}`);
 }
+
+if (!Number.isInteger(EXPECTED_STOCK) || EXPECTED_STOCK < 0) {
+  throw new Error(
+    `EXPECTED_STOCK은 0 이상의 정수여야 합니다: ${__ENV.EXPECTED_STOCK}`
+  );
+}
+
+if (!Number.isInteger(WORKER_VUS) || WORKER_VUS <= 0 || WORKER_VUS > VUS) {
+  throw new Error(`WORKER_VUS는 1 이상 VUS(${VUS}) 이하여야 합니다: ${WORKER_VUS}`);
+}
+
+const expectedSuccess = Math.min(VUS, EXPECTED_STOCK);
+const expectedSoldOut = Math.max(VUS - EXPECTED_STOCK, 0);
+const requestIntervalSeconds = durationSeconds(RAMP_UP) * WORKER_VUS / VUS;
 
 // 202는 발급 예약 성공이고 409는 품절/중복에 따른 정상적인 발급 거절이다.
 // 409를 예상 응답으로 등록하지 않으면 k6가 품절 요청까지 서버 장애로 집계한다.
@@ -27,15 +55,11 @@ http.setResponseCallback(
 export const options = {
   scenarios: {
     rush: {
-      executor: 'ramping-vus',
-      startVUs: 0,
-      stages: [
-        // 팀 공통 조건인 60초 Ramp-up, 20,000 VU를 기본값으로 사용한다.
-        // 소규모 확인 시에는 VUS와 RAMP_UP만 환경변수로 변경하면 된다.
-        { duration: RAMP_UP, target: VUS },
-      ],
-      gracefulRampDown: '30s',
-      gracefulStop: '30s',
+      // 요청 수를 고정하고 WORKER_VUS가 RAMP_UP 동안 나눠 보낸다.
+      executor: 'shared-iterations',
+      vus: WORKER_VUS,
+      iterations: VUS,
+      maxDuration: __ENV.MAX_DURATION || '10m',
     },
   },
 
@@ -45,22 +69,20 @@ export const options = {
     http_req_duration: ['p(95)<2000'],
     http_req_failed: ['rate<0.01'],
     checks: ['rate==1'],
+    issue_success_202: [`count==${expectedSuccess}`],
+    issue_sold_out_409: [`count==${expectedSoldOut}`],
+    issue_duplicate_409: ['count==0'],
     issue_system_error_5xx: ['count==0'],
     issue_other_error: ['count==0'],
   },
 };
 
 export default function () {
-  // ramping-vus는 기본 함수를 반복하므로 첫 실행에서만 요청한다.
-  // 이 방어가 없으면 한 회원이 여러 번 요청해서 총 요청 수가 20,000건을 넘을 수 있다.
-  if (__ITER > 0) {
-    sleep(1);
-    return;
-  }
+  sleep(requestIntervalSeconds);
 
   const memberIdStart = Number(__ENV.MEMBER_ID_START || '1');
-  // VU마다 서로 다른 회원 ID를 배정한다.
-  const memberId = memberIdStart + __VU - 1;
+  // 회원 ID가 겹치지 않게 한다.
+  const memberId = memberIdStart + exec.scenario.iterationInTest;
 
   const url = `${TARGET}/api/coupons/${COUPON_ID}/issues`;
   const payload = JSON.stringify({ memberId });
@@ -97,7 +119,7 @@ export default function () {
   }
 
   try {
-    // 공통 ApiResponse의 error.code로 중복과 품절을 구분한다.
+    // 거절 사유를 나눠서 센다.
     const errorCode = res.json('error.code');
 
     if (errorCode === 'DUPLICATE') {
