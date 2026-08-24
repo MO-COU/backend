@@ -1,10 +1,13 @@
 package com.mocou.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
+import com.mocou.notification.NotificationStatus;
+import com.mocou.notification.NotificationType;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -56,6 +59,7 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
                                 ISSUE_ID,
                                 "use-integration-1"))
                 .isEqualTo(1);
+        assertThat(usedNotificationCount()).isEqualTo(1);
     }
 
     @Test
@@ -75,6 +79,7 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
 
         assertThat(statusOf(ISSUE_ID)).isEqualTo("ISSUED");
         assertThat(usedHistoryCount(ISSUE_ID)).isZero();
+        assertThat(usedNotificationCount()).isZero();
     }
 
     @Test
@@ -136,6 +141,7 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
                                 assertThat(error.getErrorCode())
                                         .isEqualTo(ErrorCode.INVALID_STATE_TRANSITION));
         assertThat(usedHistoryCount(ISSUE_ID)).isEqualTo(1);
+        assertThat(usedNotificationCount()).isEqualTo(1);
     }
 
     @Test
@@ -152,6 +158,7 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
 
         assertThat(statusOf(ISSUE_ID)).isEqualTo("ISSUED");
         assertThat(usedHistoryCount(ISSUE_ID)).isZero();
+        assertThat(usedNotificationCount()).isZero();
     }
 
     @Test
@@ -167,6 +174,24 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
 
         assertThat(statusOf(ISSUE_ID)).isEqualTo("ISSUED");
         assertThat(usedHistoryCount(ISSUE_ID)).isZero();
+        assertThat(usedNotificationCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("알림 저장 실패는 커밋된 쿠폰 사용 결과에 영향을 주지 않는다")
+    void keepsCommittedUseWhenNotificationInsertFails() {
+        insertIssuedCoupon(ISSUE_ID);
+        jdbcTemplate.execute(
+                "CREATE TRIGGER fail_used_notification BEFORE INSERT ON notification "
+                        + "FOR EACH ROW SIGNAL SQLSTATE '45000' "
+                        + "SET MESSAGE_TEXT = 'forced notification failure'");
+
+        assertThatCode(() -> service.use(ISSUE_ID, "notification-failure"))
+                .doesNotThrowAnyException();
+
+        assertThat(statusOf(ISSUE_ID)).isEqualTo("USED");
+        assertThat(usedHistoryCount(ISSUE_ID)).isEqualTo(1);
+        assertThat(usedNotificationCount()).isZero();
     }
 
     @Test
@@ -183,6 +208,7 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
                 .extracting(attempt -> attempt.result().usedAt())
                 .containsOnly(attempts.getFirst().result().usedAt());
         assertThat(usedHistoryCount(ISSUE_ID)).isEqualTo(1);
+        assertThat(usedNotificationCount()).isEqualTo(1);
     }
 
     @Test
@@ -203,6 +229,7 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
                                         == ErrorCode.INVALID_STATE_TRANSITION)
                 .hasSize(1);
         assertThat(usedHistoryCount(ISSUE_ID)).isEqualTo(1);
+        assertThat(usedNotificationCount()).isEqualTo(1);
     }
 
     private String statusOf(long issueId) {
@@ -216,6 +243,17 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
                         + "WHERE coupon_issue_id = ? AND to_status = 'USED'",
                 Integer.class,
                 issueId);
+    }
+
+    private int usedNotificationCount() {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM notification "
+                        + "WHERE coupon_id = ? AND member_id = ? AND type = ? AND status = ?",
+                Integer.class,
+                FIXTURE_COUPON_ID,
+                FIXTURE_MEMBER_ID,
+                NotificationType.USED.name(),
+                NotificationStatus.SENT.name());
     }
 
     @SafeVarargs
