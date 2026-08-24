@@ -9,6 +9,7 @@ import com.mocou.consistency.VerificationContext;
 import com.mocou.consistency.VerificationRule;
 import com.mocou.consistency.ViolationTarget;
 import com.mocou.issue.CouponRedisKey;
+import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
 import com.mocou.support.MySqlContainerTest;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -19,6 +20,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.connection.stream.Consumer;
+import org.springframework.data.redis.connection.stream.ReadOffset;
+import org.springframework.data.redis.connection.stream.RecordId;
+import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -40,6 +45,9 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
     private static final long COUPON_ID = 1;
     private static final int TOTAL_QUANTITY = 10;
     private static final int REDIS_PORT = 6379;
+
+    /** 컨슈머가 실제로 만드는 그룹 이름. 값을 옮겨 적으면 규칙과 어긋나도 이 테스트가 통과해버린다. */
+    private static final String SYNC_GROUP = RedisCouponIssueSyncGateway.GROUP_NAME;
 
     private static final GenericContainer<?> REDIS =
             new GenericContainer<>(DockerImageName.parse("redis:8.8-alpine"))
@@ -197,6 +205,42 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
         assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
         assertThat(outcome.violationCount()).isZero();
         assertThat(outcome.failureReason()).contains("동기화되지 않았다");
+    }
+
+    /**
+     * {@code XLEN}과 별개로 {@code XPENDING}을 보는 이유를 확인한다.
+     *
+     * <p>컨슈머는 DB 커밋 뒤 {@code XACK}과 {@code XDEL}을 함께 하므로, 엔트리가 스트림에서 사라졌는데도 미확인으로
+     * 남아 있다면 처리가 온전히 끝나지 않은 것이다. 스트림 길이만 보면 이 상태를 "동기화 완료"로 읽는다.
+     *
+     * <p>이 경로는 그룹 이름이 컨슈머가 만든 것과 정확히 같아야 도달한다. 어긋나면 Redis가 {@code NOGROUP} 예외를
+     * 내고, 그것을 "그룹이 아직 없다"로 보는 방어 코드가 삼켜 미확인 건이 늘 0으로 나온다.
+     */
+    @Test
+    @DisplayName("스트림은 비었지만 미확인 건이 남아 있으면 판정하지 않는다")
+    void refusesToJudgeWhileEntriesAreUnacknowledged() {
+        // given - 이벤트를 그룹으로 읽고 XACK 없이 엔트리만 지운다
+        String streamKey = CouponRedisKey.issueStream(COUPON_ID);
+        RecordId recordId =
+                redisTemplate.opsForStream().add(streamKey, Map.of("memberId", "3"));
+        redisTemplate.opsForStream().createGroup(streamKey, ReadOffset.from("0"), SYNC_GROUP);
+        redisTemplate
+                .opsForStream()
+                .read(
+                        Consumer.from(SYNC_GROUP, "test-consumer"),
+                        StreamOffset.create(streamKey, ReadOffset.lastConsumed()));
+        redisTemplate.opsForStream().delete(streamKey, recordId);
+
+        // 스트림 길이로는 남은 것이 없어 보인다
+        assertThat(redisTemplate.opsForStream().size(streamKey)).isZero();
+
+        // when
+        RuleOutcome outcome = outcome();
+
+        // then
+        assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
+        assertThat(outcome.violationCount()).isZero();
+        assertThat(outcome.failureReason()).contains("처리 중이다");
     }
 
     @Test

@@ -1,0 +1,167 @@
+package com.mocou.loadtest;
+
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
+import com.mocou.issue.CouponRedisKey;
+import com.mocou.issue.initialization.CouponRedisInitializationResult;
+import com.mocou.issue.initialization.CouponRedisInitializationService;
+import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+/**
+ * 부하 테스트가 남긴 것을 지우고 시연 회차를 발급 직전 상태로 되돌린다.
+ *
+ * <p>순서가 정해져 있다. <b>Redis를 먼저 닫고, DB를 치우고, 다시 연다.</b> DB를 먼저 지우면 그동안 Redis는 여전히
+ * 발급을 받으므로, 그 사이 발급된 건이 리셋이 끝난 뒤에도 남는다.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class LoadTestResetService {
+
+    private final LoadTestResetRepository repository;
+    private final CouponRedisInitializationService redisInitializationService;
+    private final StringRedisTemplate redisTemplate;
+    private final TransactionTemplate transactionTemplate;
+
+    /**
+     * 되돌린다.
+     *
+     * @throws BusinessException 대상을 특정할 수 없거나 아직 DB로 반영되지 않은 발급이 남아 있으면
+     */
+    public LoadTestResetResult reset() {
+        long couponId = resolveTarget();
+        rejectIfSyncInProgress(couponId);
+
+        deleteRedisKeys(couponId);
+        LoadTestResetResult result = deleteDatabaseRecords(couponId);
+        initializeRedis(couponId);
+
+        log.info(
+                "부하 테스트 리셋 완료 (쿠폰 {}, 발급 {}건, 이력 {}건, 재고 {}로 복구)",
+                couponId,
+                result.deletedIssues(),
+                result.deletedHistories(),
+                result.restoredStock());
+
+        return result;
+    }
+
+    /**
+     * 되돌릴 쿠폰을 찾는다.
+     *
+     * <p>호출한 쪽이 지정하지 않는다. 파라미터로 받으면 지난 회차를 지정할 수 있게 되고, 그 회차에는 검증 대상인 발급 300만 건이
+     * 들어 있다. 오타 한 글자에 되돌릴 수 없는 삭제가 일어난다.
+     *
+     * <p>둘 이상이면 어느 쪽을 되돌릴지 서버가 알 수 없으므로 사람에게 넘긴다.
+     */
+    private long resolveTarget() {
+        List<Long> openCoupons = repository.findOpenCouponIds();
+        if (openCoupons.size() != 1) {
+            throw new BusinessException(
+                    ErrorCode.LOAD_TEST_TARGET_NOT_UNIQUE,
+                    "발급을 여는 쿠폰이 %d개다. 되돌릴 대상은 하나여야 한다".formatted(openCoupons.size()));
+        }
+        return openCoupons.get(0);
+    }
+
+    /**
+     * 컨슈머가 읽어갔지만 아직 끝내지 못한 발급이 있으면 거부한다.
+     *
+     * <p>스트림에 남아 있는 이벤트는 확인하지 않는다. 어차피 아래에서 키째로 지우기 때문이다. 막아야 하는 것은 <b>이미 읽혀서 우리가
+     * 지울 수 없는 것</b>이다. 그대로 두면 리셋이 끝난 뒤 컨슈머가 DB에 넣어, 방금 지운 발급이 되살아난다.
+     */
+    private void rejectIfSyncInProgress(long couponId) {
+        long unacknowledged = unacknowledgedCount(CouponRedisKey.issueStream(couponId));
+        if (unacknowledged > 0) {
+            throw new BusinessException(
+                    ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS,
+                    "발급 이벤트 %d건이 컨슈머에서 처리 중이다. 끝난 뒤 다시 요청해야 한다".formatted(unacknowledged));
+        }
+    }
+
+    /** 컨슈머 그룹이 아직 없으면 미확인 건도 없다. 부하 테스트를 한 번도 돌리지 않은 경우다. */
+    private long unacknowledgedCount(String streamKey) {
+        try {
+            var pending =
+                    redisTemplate
+                            .opsForStream()
+                            .pending(streamKey, RedisCouponIssueSyncGateway.GROUP_NAME);
+            return pending == null ? 0 : pending.getTotalPendingMessages();
+        } catch (DataAccessException groupNotFound) {
+            return 0;
+        }
+    }
+
+    /**
+     * 발급에 쓰이는 키를 모두 지운다.
+     *
+     * <p>재고만 되돌리면 {@code issued-members}에 남은 회원이 다음 부하 테스트에서 중복으로 걸러진다. 스트림을 지우면
+     * 컨슈머 그룹도 함께 사라져 다음 실행에서 새로 만들어진다.
+     */
+    private void deleteRedisKeys(long couponId) {
+        redisTemplate.delete(
+                Set.of(
+                        CouponRedisKey.stock(couponId),
+                        CouponRedisKey.metadata(couponId),
+                        CouponRedisKey.issuedMembers(couponId),
+                        CouponRedisKey.issueStream(couponId)));
+    }
+
+    /**
+     * DB에서 지우고 재고를 되돌린다. <b>여기만</b> 한 트랜잭션으로 묶는다.
+     *
+     * <p>{@code @Transactional}을 메서드 전체에 걸지 않는 이유는 Redis 작업이 트랜잭션 안에 들어가면 안 되기 때문이다.
+     * Redis는 롤백되지 않아 원자성이 반쪽이 되고, DB 커넥션을 잡은 채 네트워크를 기다리게 된다. 애노테이션은 메서드 단위라 일부만
+     * 감쌀 수 없어 {@link TransactionTemplate}을 쓴다.
+     *
+     * <p>지우는 순서는 FK가 정한다. 이력이 발급을 참조하므로 이력을 먼저 지우지 않으면 {@code ERROR 1451}로 막힌다.
+     */
+    private LoadTestResetResult deleteDatabaseRecords(long couponId) {
+        LoadTestResetResult result =
+                transactionTemplate.execute(
+                        status -> {
+                            int histories = repository.deleteHistories(couponId);
+                            int issues = repository.deleteIssues(couponId);
+                            int failureLogs = repository.deleteFailureLogs(couponId);
+                            int notifications = repository.deleteNotifications(couponId);
+                            int verificationRuns = repository.deleteAllVerificationRecords();
+                            int restoredStock = repository.restoreStock(couponId);
+
+                            return new LoadTestResetResult(
+                                    couponId,
+                                    issues,
+                                    histories,
+                                    failureLogs,
+                                    notifications,
+                                    verificationRuns,
+                                    restoredStock);
+                        });
+        return Objects.requireNonNull(result, "트랜잭션 콜백이 결과를 돌려주지 않았다");
+    }
+
+    /**
+     * 재고와 발급 시간을 DB 값으로 다시 세운다.
+     *
+     * <p>초기화 스크립트는 키가 이미 있으면 덮어쓰지 않으므로 위에서 먼저 지워야 한다. {@code datagen}이 마지막에 부르는 것과
+     * 같은 경로라 값이 어긋날 여지가 없다.
+     *
+     * <p>{@code datagen}은 {@code ALREADY_INITIALIZED}를 정상으로 보지만 여기서는 아니다. 바로 앞에서 키를
+     * 지웠으므로 새로 세워졌어야 한다. 그 값이 나왔다면 삭제가 되지 않은 것이다.
+     */
+    private void initializeRedis(long couponId) {
+        CouponRedisInitializationResult result = redisInitializationService.initialize(couponId);
+        if (result != CouponRedisInitializationResult.INITIALIZED) {
+            throw new IllegalStateException(
+                    "리셋 후 Redis 초기화가 예상과 다르다. couponId=%d, result=%s".formatted(couponId, result));
+        }
+    }
+}
