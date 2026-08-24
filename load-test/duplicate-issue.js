@@ -10,6 +10,10 @@ const TARGET = __ENV.TARGET || 'http://localhost:8080';
 const COUPON_ID = __ENV.COUPON_ID || '301';
 const MEMBER_ID = Number(__ENV.MEMBER_ID || '999999');
 
+if (!Number.isInteger(MEMBER_ID) || MEMBER_ID <= 0) {
+    throw new Error(`MEMBER_ID는 양의 정수여야 합니다: ${__ENV.MEMBER_ID}`);
+}
+
 // 중복 발급 409는 이 테스트에서 기대하는 정상 응답이다.
 http.setResponseCallback(
     http.expectedStatuses(202, 409)
@@ -38,6 +42,7 @@ export default function () {
             'Content-Type': 'application/json',
         },
         tags: { name: 'duplicate-test' },
+        timeout: __ENV.REQUEST_TIMEOUT || '5s',
     };
 
     const res = http.post(url, payload, params);
