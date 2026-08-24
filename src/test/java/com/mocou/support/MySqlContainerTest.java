@@ -46,11 +46,21 @@ public abstract class MySqlContainerTest {
         registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
     }
 
-    /** 자식 테이블부터 지워야 FK 제약에 걸리지 않는다. */
+    /**
+     * 자식 테이블부터 지워야 FK 제약에 걸리지 않는다.
+     *
+     * <p>{@code coupon}을 참조하는 테이블은 {@code coupon_issue}·{@code coupon_stock}·
+     * {@code coupon_issue_run}·{@code notification}이고, {@code member}를 참조하는 것은
+     * {@code coupon_issue}·{@code notification}이다. 하나라도 빠지면 그 행을 남긴 테스트 다음에 오는
+     * 테스트가 {@code DELETE FROM coupon}에서 막힌다.
+     */
     @BeforeEach
     void resetCouponData() {
         jdbcTemplate.update("DELETE FROM coupon_issue_history");
         jdbcTemplate.update("DELETE FROM coupon_issue");
+        jdbcTemplate.update("DELETE FROM coupon_issue_run");
+        jdbcTemplate.update("DELETE FROM notification");
+        jdbcTemplate.update("DELETE FROM issue_failure_log");
         jdbcTemplate.update("DELETE FROM coupon_stock");
         jdbcTemplate.update("DELETE FROM coupon");
         jdbcTemplate.update("DELETE FROM member");

@@ -7,6 +7,7 @@ import com.mocou.consistency.VerificationRule;
 import com.mocou.consistency.Violation;
 import com.mocou.consistency.ViolationTarget;
 import com.mocou.issue.CouponRedisKey;
+import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -38,8 +39,13 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 class RedisDbMismatchRule implements ConsistencyRule {
 
-    /** 컨슈머가 만드는 그룹 이름과 같아야 미확인 건을 볼 수 있다. */
-    private static final String SYNC_GROUP = "coupon-issue-sync";
+    /**
+     * 컨슈머가 만드는 그룹 이름. 문자열을 옮겨 적지 않고 상수를 그대로 가리킨다.
+     *
+     * <p>값을 복사해 두면 어긋나도 아무 데서도 걸리지 않는다. 없는 그룹을 조회하면 예외가 나고, 그것을 "그룹이 아직 없다"로
+     * 보는 아래 {@code catch}가 삼켜 미확인 건이 늘 0으로 나온다.
+     */
+    private static final String SYNC_GROUP = RedisCouponIssueSyncGateway.GROUP_NAME;
 
     /**
      * 검사 대상 쿠폰. Redis 키는 발급을 여는 쿠폰에만 만들어지므로 DB에서 그 목록을 가져온다.

@@ -38,6 +38,13 @@ public enum ErrorCode {
     // 결과 행도 둘로 갈리므로, 진행 중인 실행이 있으면 새 요청을 받지 않는다.
     VERIFICATION_ALREADY_RUNNING(HttpStatus.CONFLICT, "이미 진행 중인 정합성 검증이 있습니다"),
 
+    // 부하 테스트 리셋
+    // 되돌릴 대상은 서버가 정한다. 발급을 여는 쿠폰이 하나여야 어느 회차를 되돌릴지 정해지며,
+    // 없거나 둘 이상이면 사람이 판단해야 한다.
+    LOAD_TEST_TARGET_NOT_UNIQUE(HttpStatus.CONFLICT, "되돌릴 대상 쿠폰을 특정할 수 없습니다"),
+    // 컨슈머가 읽어간 발급은 리셋이 끝난 뒤 DB에 들어올 수 있다. 그러면 지운 발급이 되살아난다.
+    LOAD_TEST_SYNC_IN_PROGRESS(HttpStatus.CONFLICT, "아직 DB로 반영되지 않은 발급이 남아 있습니다"),
+
     // 서버
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스를 일시적으로 사용할 수 없습니다"),
     SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다"),
