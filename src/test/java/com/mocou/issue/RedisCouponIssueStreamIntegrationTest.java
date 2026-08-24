@@ -174,4 +174,69 @@ public class RedisCouponIssueStreamIntegrationTest
                         issueStreamKey(),
                         Range.unbounded());
     }
+
+    @Test
+    @DisplayName("Redis 예약 결과를 쿠폰별 Hash Counter로 집계한다")
+    void countsReservationResults() {
+        setStock(1);
+
+        CouponReservationResult reserved =
+                gateway.reserveAndAppendEvent(
+                        COUPON_ID,
+                        100L,
+                        UUID.randomUUID());
+
+        CouponReservationResult duplicate =
+                gateway.reserveAndAppendEvent(
+                        COUPON_ID,
+                        100L,
+                        UUID.randomUUID());
+
+        CouponReservationResult soldOut =
+                gateway.reserveAndAppendEvent(
+                        COUPON_ID,
+                        101L,
+                        UUID.randomUUID());
+
+        assertThat(reserved)
+                .isEqualTo(CouponReservationResult.RESERVED);
+        assertThat(duplicate)
+                .isEqualTo(
+                        CouponReservationResult.DUPLICATE_ISSUE);
+        assertThat(soldOut)
+                .isEqualTo(CouponReservationResult.SOLD_OUT);
+
+        assertThat(issueResultCount("RESERVED"))
+                .isEqualTo(1L);
+        assertThat(issueResultCount("DUPLICATE_ISSUE"))
+                .isEqualTo(1L);
+        assertThat(issueResultCount("SOLD_OUT"))
+                .isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("결과 Counter Key가 Hash가 아니면 예약 상태를 남기지 않는다")
+    void rejectsWrongResultCounterType() {
+        setStock(1);
+
+        redisTemplate.opsForValue().set(
+                issueResultCountsKey(),
+                "not-a-hash");
+
+        assertThatThrownBy(() ->
+                gateway.reserveAndAppendEvent(
+                        COUPON_ID,
+                        100L,
+                        UUID.randomUUID()))
+                .isInstanceOf(DataAccessException.class);
+
+        assertThat(currentStock()).isEqualTo("1");
+        assertThat(redisTemplate.opsForSet().isMember(
+                issuedMembersKey(),
+                "100"))
+                .isFalse();
+        assertThat(redisTemplate.hasKey(issueStreamKey()))
+                .isFalse();
+    }
+
 }

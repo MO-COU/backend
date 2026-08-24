@@ -90,6 +90,22 @@ abstract class RedisCouponIssueIntegrationTestSupport {
                         Long.toString(closeAtEpochSecond)));
     }
 
+    protected String issueResultCountsKey() {
+        return CouponRedisKey.issueResultCounts(COUPON_ID);
+    }
+
+    protected long issueResultCount(String result) {
+        Object value = redisTemplate.opsForHash().get(
+                issueResultCountsKey(),
+                result);
+
+        if (value == null) {
+            return 0L;
+        }
+
+        return Long.parseLong(value.toString());
+    }
+
     protected String currentStock() {
         return redisTemplate.opsForValue().get(stockKey());
     }
