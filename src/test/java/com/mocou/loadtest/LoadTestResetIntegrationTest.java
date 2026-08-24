@@ -162,6 +162,31 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
         assertThat(redisTemplate.hasKey(CouponRedisKey.issuedMembers(DEMO_COUPON_ID))).isFalse();
     }
 
+    /**
+     * 스트림 키를 지우면 컨슈머 그룹도 함께 사라진다. 컨슈머는 그룹을 만들었다는 사실을 메모리에 들고 있어 다시 만들지 않으므로,
+     * 되살려놓지 않으면 다음 부하 테스트의 발급이 한 건도 DB로 넘어가지 않는다.
+     *
+     * <p>실제로 이 상태에서 발급 10,000건이 스트림에 쌓인 채 멈췄고 앱을 재시작해서야 풀렸다.
+     */
+    @Test
+    @DisplayName("리셋 뒤에도 발급 이벤트를 읽을 컨슈머 그룹이 남아 있다")
+    void restoresConsumerGroupAfterReset() {
+        // given - 부하 테스트가 만들어둔 그룹
+        String streamKey = CouponRedisKey.issueStream(DEMO_COUPON_ID);
+        redisTemplate.opsForStream().add(streamKey, Map.of("memberId", "5"));
+        redisTemplate
+                .opsForStream()
+                .createGroup(streamKey, ReadOffset.from("0"), RedisCouponIssueSyncGateway.GROUP_NAME);
+
+        // when
+        resetService.reset();
+
+        // then - 스트림은 비워졌지만 그룹은 다시 만들어져 있어야 한다
+        assertThat(redisTemplate.opsForStream().size(streamKey)).isZero();
+        assertThat(redisTemplate.opsForStream().groups(streamKey))
+                .anyMatch(group -> RedisCouponIssueSyncGateway.GROUP_NAME.equals(group.groupName()));
+    }
+
     @Test
     @DisplayName("발급을 여는 쿠폰이 없으면 거부한다")
     void rejectsWhenNoOpenCoupon() {
