@@ -6,3 +6,10 @@ spring:
       ddl-auto: validate
     # 기본값(true)로 두면 요청이 끝날 때까지 커넥션을 계속 붙잡는다(Open Session In View).
     open-in-view: false
+
+mocou:
+  issue:
+    sync:
+      # 기본값 false. local 프로필엔 절대 넣지 않음.
+      # 꺼진 채로 배포하면 발급이 Redis에만 쌓이고 DB로 절대 안 넘어간다.
+      enabled: true
