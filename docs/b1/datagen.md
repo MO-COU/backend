@@ -74,15 +74,17 @@
 회차 안에서 순번 `order`(1..10,000)를 회원 번호로 옮긴다.
 
 ```
-member_id = ((order × 1000003 + roundOffset) % 1000000) + 1
+member_id = ((order × 618041 + roundOffset) % 1000000) + 1
 roundOffset = (round × 7919) % 1000000
 ```
 
-`1000003`이 회원 수 `1000000`과 서로소이므로 **순번이 다르면 회원 번호도 반드시 다르다.** 회차당 1인 1매를 코드가 보장하고, `UNIQUE (coupon_id, member_id)`가 그 결과를 DB에서 다시 확인한다.
+`618041`이 회원 수와 서로소이므로 **순번이 다르면 회원 번호도 반드시 다르다.** 회차당 1인 1매를 코드가 보장하고, `UNIQUE (coupon_id, member_id)`가 그 결과를 DB에서 다시 확인한다. 회원 수를 `618041`의 배수로 설정하면 이 성질이 깨지므로 기동 시 최대공약수를 검사해 중단한다.
 
 난수로 뽑고 충돌하면 다시 뽑는 방식은 쓰지 않았다. 재시도 횟수가 실행마다 달라지면 난수 소비량이 흔들려 재현성이 깨지기 때문이다.
 
-회차마다 `roundOffset`으로 시작점을 옮겨 당첨자 명단이 달라진다. 회원 100만 명에 발급 300만 건이므로 **회원 한 명이 평균 3회 당첨**된다.
+**보폭이 `618041`인 이유.** 서로소는 충돌만 막을 뿐 당첨자가 잘 흩어지는지는 보장하지 않는다. 보폭이 회원 수의 간단한 분수 배수(1/2, 1/3 …)에 가까우면 금방 제자리로 돌아와 특정 구간에 몰린다. `618041`은 회원 100만 기준 황금비(0.618…)에 가장 가까운 소수이며, 황금비는 어떤 분수로도 잘 근사되지 않아 가장 늦게까지 뭉치지 않는다.
+
+회차마다 `roundOffset`으로 시작점을 옮겨 당첨자 명단이 달라진다. 회원 100만 명에 발급 300만 건이므로 **회원 한 명이 평균 3회 당첨**되며, 실제 분포는 2~4회다.
 
 ### 3.3 발급 시각
 
@@ -140,6 +142,37 @@ SET s.remaining_quantity = s.total_quantity - t.issued
 
 > **주의:** 이 방식 때문에 적재 직후에는 `total = 발급 + 잔여`가 정의상 항상 성립한다. 즉 재고 정합성 규칙은 datagen 데이터만으로는 위반을 만들 수 없고, A팀 발급 경로가 붙은 뒤에야 의미를 갖는다.
 
+
+### 3.7 시연용 쿠폰 Redis 초기화 (`CouponRedisInitializationService`)
+
+Redis Lua 기반 발급 경로는 요청마다 MySQL을 조회하지 않는다. 따라서 더미데이터 적재가 끝나면 시연용 `OPEN` 쿠폰의 최종 재고와 발급 가능 시간을 Redis에 미리 저장한다.
+
+```text
+CouponSeeder
+→ MemberGenerator
+→ IssueGenerator
+→ StockReconciler
+→ CouponRedisInitializationService
+```
+
+`StockReconciler`가 실제 발급 이력을 기준으로 DB 잔여 재고를 확정한 뒤 Redis를 초기화한다. 초기화 기준값의 원본은 MySQL이며 Redis는 발급 요청을 빠르게 처리하기 위한 복사본이다.
+
+| Redis Key | 자료형 | 저장 값 |
+| --- | --- | --- |
+| `coupon:{couponId}:stock` | String | `coupon_stock.remaining_quantity` |
+| `coupon:{couponId}:metadata` | Hash | `openAtEpochSecond`, `closeAtEpochSecond` |
+
+발급 시간은 MySQL의 coupon.open_at, coupon.close_at을 Asia/Seoul 기준 Epoch Second로 변환해 저장한다. 과거 300개 회차는 부하 테스트 대상이 아니므로 초기화하지 않고, 시연용 회차 하나만 초기화한다.
+재고 Key와 Metadata Key는 Lua Script 하나에서 원자적으로 생성한다.
+
+| 초기화 결과 | 처리 |
+| --- | --- |
+| `INITIALIZED` | 두 Key를 새로 생성하고 계속 진행 |
+| `ALREADY_INITIALIZED` | 발급으로 차감됐을 수 있는 기존 재고를 덮어쓰지 않고 계속 진행 |
+| `INCONSISTENT_STATE` | 두 Key 중 하나만 존재하는 비정상 상태이므로 실행 중단 |
+
+DB 데이터가 이미 존재하면 대용량 데이터 생성은 건너뛰지만 Redis 초기화는 다시 확인한다. Redis 재시작이나 데이터 유실로 Key가 사라진 경우 DB 값을 기준으로 복구하기 위해서다.
+
 ---
 
 ## 4. 실행 방법
@@ -162,9 +195,11 @@ MySQL(3306) · Redis(6379)가 뜨고 Flyway가 스키마를 적용한다. `docke
 
 HTTP로 열지 않은 이유는, 요청 한 번이 수백만 행 적재를 유발하고 중복 실행 시 `UNIQUE (coupon_id, member_id)`에 걸려 **데이터가 절반만 들어간 상태로 남기** 때문이다.
 
-`member` 또는 `coupon`에 행이 있으면 경고를 남기고 건너뛴다. 다시 만들려면 4.4의 초기화가 먼저다.
+`member` 또는 `coupon`에 행이 있으면 대용량 데이터 생성은 건너뛴다. 다만 Redis 재시작 등으로 시연용 쿠폰 Key가 사라질 수 있으므로 Redis 초기화 상태는 다시 확인한다. DB 데이터까지 다시 만들려면 4.4의 초기화가 먼저다.
 
-기본 설정(회원 100만 + 발급 300만)은 맥 + Docker 환경에서 **약 11분** 걸린다. 중간에 멈춘 것처럼 보여도 회차별 진행 로그가 계속 찍히므로 그것으로 확인한다.
+기본 설정(회원 100만 + 발급 300만)은 맥 + Docker 환경에서 **7~11분** 걸린다. 중간에 멈춘 것처럼 보여도 회차별 진행 로그가 계속 찍히므로 그것으로 확인한다.
+
+앱이 이미 8080 포트에서 돌고 있으면 기동에 실패한다. datagen은 HTTP를 쓰지 않으므로 `--server.port=0`을 붙이면 포트를 비우지 않고도 실행할 수 있다.
 
 ### 4.3 파라미터
 
@@ -190,24 +225,37 @@ HTTP로 열지 않은 이유는, 요청 한 번이 수백만 행 적재를 유�
 
 ### 4.4 초기화
 
-FK가 걸려 있어 `TRUNCATE`가 통하지 않는다. 자식 테이블부터 지운다.
+FK가 참조하는 테이블은 `TRUNCATE`가 거부되므로(`ERROR 1701`) 검사를 끄고 자식부터 지운다.
+
+**검증 실행 기록도 함께 지운다.** 데이터를 통째로 다시 만들면 그 데이터를 대상으로 한 검증 결과는 의미가 없고, `verification_run.issue_run_id`가 `coupon_issue_run`을 참조하므로 남겨두면 끊어진 참조가 된다.
 
 ```sql
 SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE verification_violation;
+TRUNCATE TABLE verification_rule_result;
+TRUNCATE TABLE verification_run;
+TRUNCATE TABLE coupon_issue_run;
 TRUNCATE TABLE coupon_issue_history;
 TRUNCATE TABLE coupon_issue;
 TRUNCATE TABLE notification;
 TRUNCATE TABLE issue_failure_log;
-TRUNCATE TABLE coupon_issue_run;
 TRUNCATE TABLE coupon_stock;
 TRUNCATE TABLE coupon;
 TRUNCATE TABLE member;
 SET FOREIGN_KEY_CHECKS = 1;
 ```
 
-`verification_*` 3종은 검증 실행 기록이라 데이터 재생성과 무관하다. 함께 지우려면 `verification_violation` → `verification_rule_result` → `verification_run` 순서를 지킨다.
+검증 기록을 보존해야 한다면 `coupon_issue_run`을 지우지 않는 부분 삭제 절차를 따로 써야 한다. 위 스크립트는 전체 초기화 전용이다.
 
-`FOREIGN_KEY_CHECKS = 0`은 **세션 변수**다. 다른 커넥션에는 영향이 없고, 이 스크립트를 실행한 세션에서만 유효하다.
+`FOREIGN_KEY_CHECKS = 0`은 **세션 변수**다. 다른 커넥션에는 영향이 없고 이 스크립트를 실행한 세션에서만 유효하며, 켜져 있는 동안에는 부모 테이블을 지워도 막히지 않는다. 순서를 지키지 않으면 에러 없이 고아 행이 남는다.
+
+로컬 Redis도 함께 초기화해야 다음 datagen 실행에서 DB 값을 다시 반영할 수 있다. 아래 명령은 현재 Redis DB의 모든 Key를 삭제하므로 로컬 전용 환경에서만 실행한다.
+
+```bash
+docker compose exec redis redis-cli FLUSHDB
+```
+
+Redis를 초기화하지 않으면 기존 재고를 보호하기 위해 ALREADY_INITIALIZED가 반환되며, DB를 다시 생성해도 Redis 재고를 덮어쓰지 않는다.
 
 ---
 
@@ -231,7 +279,26 @@ GROUP BY s.coupon_id, s.total_quantity, s.remaining_quantity
 HAVING s.total_quantity <> s.remaining_quantity + issued;
 ```
 
-이 쿼리들은 눈으로 확인하는 수단이며, 정식 검증 도구가 아니다. 규칙 기반 검증은 `com.mocou.consistency`가 담당한다.
+이 쿼리들은 눈으로 확인하는 수단이며, 정식 검증 도구가 아니다.
+
+규칙 기반 검증은 `com.mocou.consistency`(B1 담당)가 맡는다. 판정식은 [정합성 검증 규칙 명세](./consistency-rules.md)에 있고, 실행은 아래 한 줄로 한다.
+
+```bash
+curl -X POST 'http://localhost:8080/api/admin/verifications'
+```
+
+결과 조회와 진행 중 판별은 명세의 [2.3 실행 방법](./consistency-rules.md)을 본다.
+
+```text
+기본 설정에서는 시연용 쿠폰 ID가 `301`이다. Redis 초기화 결과는 다음 명령으로 확인한다.
+```
+
+```bash
+docker compose exec redis redis-cli GET "coupon:{301}:stock"
+docker compose exec redis redis-cli HGETALL "coupon:{301}:metadata"
+```
+
+stock은 기본값 10000, Metadata에는 openAtEpochSecond와 closeAtEpochSecond가 있어야 한다. round-count를 변경했다면 시연용 쿠폰 ID는 round-count + 1이다.
 
 ---
 
