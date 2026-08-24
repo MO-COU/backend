@@ -23,7 +23,9 @@ DB는 EC2의 `docker compose` MySQL 컨테이너 안에서 직접 실행한다. 
 - `mocou.lifecycle.expiration.scheduler-enabled=false`
 - 서버에 `docker`, `curl`, `jq`, `k6`, `tar`가 설치됨
 
-스크립트는 실행 전에 health, capability, Scheduler 비활성, MySQL 접속, 필수 도구를 자동으로 확인한다. 하나라도 실패하면 부하·데이터 변경 전에 종료한다.
+스크립트는 실행 전에 health, capability, Scheduler 비활성, MySQL 접속, 필수 도구를 자동으로 확인한다. 하나라도 실패하면 부하·데이터 변경 전에 종료한다. 입력한 청크 크기도 capability가 반환한 허용 범위 안인지 데이터 준비 전에 확인한다.
+
+정상 실행의 종료 코드는 `0`이다. 종료 코드가 `0`이 아니면 테스트 담당자는 결과를 해석하거나 임의로 재실행하지 않고, 출력된 `RESULT_FILE`과 `ARTIFACT_BUNDLE`을 결과 검토자에게 함께 전달한다. Batch 시작·대기 실패 시에도 스크립트는 실행 중인 k6를 종료하고 테스트 데이터(알림 포함)를 정리한 뒤 실패한다.
 
 ## 1단계 — A·C 청크 비교
 
@@ -57,7 +59,7 @@ EC2에서 아래 명령을 그대로 실행한다.
   --repeats 3
 ```
 
-`result.txt`는 A의 Batch 시간·상태·이력, C의 Batch 시간·API p95/p99·API 성공 수와 실제 USED 수·dropped iteration·PASS/FAIL을 후보별 반복 행으로 자동 출력한다. 실행 후 이 파일 전체를 복사해 결과 검토자에게 전달한다. 자동 실패 또는 검토자 요청 시 같은 경로의 `artifacts.tar.gz`도 함께 전달한다.
+`result.txt`는 A의 Batch 시간·상태·이력, C의 Batch 시간·API p95/p99·API 성공 수와 실제 USED 수·dropped iteration·PASS/FAIL을 후보별 반복 행으로 자동 출력한다. warmup은 원시 산출물에만 남고 후보 비교 표에는 포함되지 않는다. 사용 API가 성공한 경우 `USED` 알림 기록 수도 실제 `USED` 수와 자동 대조한다. 실행 후 이 파일 전체를 복사해 결과 검토자에게 전달한다. 자동 실패 또는 검토자 요청 시 같은 경로의 `artifacts.tar.gz`도 함께 전달한다.
 
 결과 검토자는 안정성 오류·5xx·timeout·deadlock·dropped iteration이 있는 후보를 먼저 제외한다. 남은 후보의 A 대비 C Batch 지연율, API p95/p99, Lock 대기, Connection 사용량을 비교한다. 명확한 개선이 없거나 결과가 엇갈리면 기본값 2,000을 유지한다.
 
@@ -83,7 +85,7 @@ T-5초                T≈B               T+5초
   --repeats 3
 ```
 
-자동 확인은 요청 10,000건, `dropped_iterations=0`, `|B-T| ≤ 1초`, 예상 외 응답·5xx·timeout·deadlock 0건, 최종 `USED + EXPIRED = 10,000`, `ISSUED = 0`, 상태·이력 불일치 0건이다. 완료 후 `result.txt` 전체를 결과 검토자에게 전달한다.
+자동 확인은 요청 10,000건, `dropped_iterations=0`, `|B-T| ≤ 1초`, 예상 외 응답·5xx·timeout·deadlock 0건, 최종 `USED + EXPIRED = 10,000`, `ISSUED = 0`, 상태·이력 불일치 0건, `USED` 알림 기록 수와 `USED` 수의 일치를 모두 요구한다. 완료 후 `result.txt` 전체를 결과 검토자에게 전달한다.
 
 ## 전달 파일
 
