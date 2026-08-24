@@ -23,11 +23,11 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # GHCR 로그인 및 GitHub Actions 임시 토큰 자동 발급
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -35,7 +35,7 @@ jobs:
 
       # 저장소 루트의 Dockerfile 기준으로 이미지 빌드 및 푸시
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
@@ -52,7 +52,7 @@ jobs:
     steps:
       # CD 전용 IAM 자격증명으로 인증 (팀원 개인 SSM 키 사용 금지)
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
