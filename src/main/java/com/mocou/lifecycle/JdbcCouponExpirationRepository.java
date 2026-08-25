@@ -6,19 +6,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
+/** 만료 처리용 SQL을 실행한다. 상태 전이 판단은 Service에서 결정한다. */
 public class JdbcCouponExpirationRepository implements CouponExpirationRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
     public JdbcCouponExpirationRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-    }
-
-    @Override
-    public LocalDateTime currentDatabaseTime() {
-        return jdbcTemplate.queryForObject(
-                "SELECT CURRENT_TIMESTAMP",
-                (resultSet, rowNumber) -> resultSet.getTimestamp(1).toLocalDateTime());
     }
 
     @Override

@@ -11,6 +11,7 @@ import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Range;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.RedisStreamCommands.XClaimOptions;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
@@ -32,6 +33,7 @@ import com.mocou.notification.NotificationType;
 
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 쿠폰 발급 이벤트 Stream을 읽어 DB로 동기화하는 컨슈머.
@@ -49,6 +51,7 @@ import lombok.RequiredArgsConstructor;
  * <p>동시에 열려있는 쿠폰이 여러 개인 경우는 다루지 않는다(1차 MVP는 쿠폰
  * 하나 기준) — {@link #consume()}은 여러 건이 와도 하나만 처리한다.
  */
+@Slf4j
 @Component
 @ConditionalOnProperty(prefix = "mocou.issue.sync", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
@@ -58,6 +61,7 @@ public class CouponIssueSyncConsumer {
     // 인스턴스가 하나뿐인 MVP라 고정값 — 여러 인스턴스를 띄우면 인스턴스마다 달라야 함.
     private static final String CONSUMER_NAME = "sync-worker-1";
     private static final ZoneId COUPON_TIME_ZONE = ZoneId.of("Asia/Seoul");
+    private static final String NO_GROUP_ERROR = "NOGROUP";
 
     private final StringRedisTemplate redisTemplate;
     private final RedisCouponIssueSyncGateway syncGateway;
@@ -104,35 +108,70 @@ public class CouponIssueSyncConsumer {
         pollOnce(couponIds.getFirst());
     }
 
-    /** 배치를 완성하는 게 아니라 "한 스텝 진행"시킨다 — 조건이 찰 때까지 여러 번 불린다. */
+    /**
+     * 배치를 완성하는 게 아니라 "한 스텝 진행"시킨다 — 조건이 찰 때까지 여러 번 불린다.
+     *
+     * <p>Redis가 초기화(FLUSHALL/재시작 등)되면 스트림과 컨슈머 그룹이 통째로 사라지는데,
+     * {@link #groupEnsuredForCouponId}는 JVM 메모리 캐시라 이 사실을 모른다. 그래서 실제
+     * Redis 명령(XPENDING/XREADGROUP 등)이 {@code NOGROUP}으로 실패하는 걸 여기서 감지해
+     * 캐시를 무효화한다 — 다음 tick에 {@link #ensureConsumerGroup}이 그룹을 다시 만든다.
+     * 앱 재시작 없이도 스스로 복구된다.
+     */
     private void pollOnce(long couponId) {
         String streamKey = CouponRedisKey.issueStream(couponId);
         ensureConsumerGroup(couponId);
-        reclaimStalePendingEntries(streamKey);
 
-        int remaining = properties.getChunkSize() - buffer.records.size();
-        if (remaining > 0) {
-            List<MapRecord<String, String, String>> messages = readNext(streamKey, remaining);
-            if (messages != null && !messages.isEmpty()) {
-                // 첫 이벤트가 들어온 순간에만 데드라인을 고정한다.
-                if (buffer.records.isEmpty()) {
-                    buffer.deadline = Instant.now().plusMillis(properties.getBatchWindowMs());
+        try {
+            reclaimStalePendingEntries(streamKey);
+
+            int remaining = properties.getChunkSize() - buffer.records.size();
+            if (remaining > 0) {
+                List<MapRecord<String, String, String>> messages = readNext(streamKey, remaining);
+                if (messages != null && !messages.isEmpty()) {
+                    // 첫 이벤트가 들어온 순간에만 데드라인을 고정한다.
+                    if (buffer.records.isEmpty()) {
+                        buffer.deadline = Instant.now().plusMillis(properties.getBatchWindowMs());
+                    }
+                    buffer.records.addAll(messages);
                 }
-                buffer.records.addAll(messages);
             }
-        }
 
-        flushIfDue(couponId, streamKey);
+            flushIfDue(couponId, streamKey);
+        } catch (RedisSystemException exception) {
+            if (isNoGroupError(exception)) {
+                log.warn(
+                        "Redis 초기화 등으로 컨슈머 그룹이 사라진 것을 감지했다. "
+                                + "캐시를 무효화해 다음 tick에 재생성한다. couponId={}",
+                        couponId);
+                groupEnsuredForCouponId = null;
+            }
+            throw exception;
+        }
     }
 
-    /** XREADGROUP은 그룹이 없으면 NOGROUP 에러를 던지므로 미리 보장해둔다. */
+    /**
+     * XREADGROUP은 그룹이 없으면 NOGROUP 에러를 던지므로 미리 보장해둔다.
+     *
+     * <p>그룹을 실제로 (다시) 만들어야 하는 시점(최초 실행, 또는 NOGROUP 감지로 캐시가
+     * 무효화된 뒤)은 캐시가 최신이 아니었을 수 있다는 신호이기도 하다 — {@code openCouponIds}는
+     * {@code CouponStatusChangedEvent}로만 갱신되는데, 그 이벤트가 유실되거나 재시작 시점에
+     * DB 상태 반영이 늦었을 수 있다. 그래서 그룹 생성 직전에 OPEN 쿠폰 목록도 한 번 더
+     * 조회해서 같이 최신화한다. 그룹 생성 자체가 드문(캐시 히트가 대부분인) 이벤트라 매
+     * tick DB를 두드리는 것과 달리 부담이 없다.
+     */
     private void ensureConsumerGroup(long couponId) {
         if (groupEnsuredForCouponId != null && groupEnsuredForCouponId == couponId) {
             return;
         }
 
+        refreshOpenCouponIds();
         syncGateway.ensureConsumerGroup(couponId);
         groupEnsuredForCouponId = couponId;
+    }
+
+    private boolean isNoGroupError(RedisSystemException exception) {
+        Throwable cause = exception.getMostSpecificCause();
+        return cause.getMessage() != null && cause.getMessage().contains(NO_GROUP_ERROR);
     }
 
     /**

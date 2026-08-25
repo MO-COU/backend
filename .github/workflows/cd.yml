@@ -8,9 +8,10 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
-# 빌드한 이미지를 저장할 주소 정의 {MO-COU}
+# 빌드한 이미지를 저장할 주소 정의.
+# 레지스트리 저장소 경로는 소문자만 허용되므로 고정 소문자로 적는다 (docker-compose.prod.yml과 동일).
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/backend
+  IMAGE: ghcr.io/mo-cou/backend
 
 jobs:
   # 1. build-and-push : 이미지 생성 후 저장소에 올림
@@ -22,11 +23,11 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # GHCR 로그인 및 GitHub Actions 임시 토큰 자동 발급
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -34,7 +35,7 @@ jobs:
 
       # 저장소 루트의 Dockerfile 기준으로 이미지 빌드 및 푸시
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
@@ -46,10 +47,12 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    # AWS_* 시크릿 스코프 지정
+    environment: MOCOU-AWS
     steps:
       # CD 전용 IAM 자격증명으로 인증 (팀원 개인 SSM 키 사용 금지)
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -60,12 +63,15 @@ jobs:
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
+          # AWS-RunShellScript는 root로 실행되어 ~가 ubuntu 홈이 아니다. 절대경로로 지정한다.
+          # set -e로 중간에 하나라도 실패하면 뒤 명령을 이어가지 않고 스크립트 전체를 실패시킨다
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy mocou backend" \
             --parameters '{"commands":[
-              "cd ~/mocou",
+              "set -e",
+              "cd /home/ubuntu/mocou",
               "docker compose -f docker-compose.prod.yml pull",
               "docker compose -f docker-compose.prod.yml up -d",
               "docker image prune -f"
@@ -76,8 +82,16 @@ jobs:
           echo "Command ID: $COMMAND_ID"
           aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
 
-          aws ssm get-command-invocation \
+          RESULT=$(aws ssm get-command-invocation \
             --command-id "$COMMAND_ID" \
             --instance-id "$INSTANCE_ID" \
             --query "{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}" \
-            --output json
+            --output json)
+
+          echo "$RESULT"
+
+          STATUS=$(echo "$RESULT" | jq -r .Status)
+          if [ "$STATUS" != "Success" ]; then
+            echo "::error::SSM deploy command finished with status $STATUS"
+            exit 1
+          fi

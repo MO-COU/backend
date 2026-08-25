@@ -1,6 +1,7 @@
 package com.mocou.lifecycle;
 
 import com.mocou.support.MySqlContainerTest;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
 /**
@@ -11,12 +12,19 @@ import org.junit.jupiter.api.BeforeEach;
  */
 abstract class CouponLifecycleIntegrationTestSupport extends MySqlContainerTest {
 
-    private static final long FIXTURE_MEMBER_ID = 1001L;
-    private static final long FIXTURE_COUPON_ID = 2001L;
+    protected static final long FIXTURE_MEMBER_ID = 1001L;
+    protected static final long FIXTURE_COUPON_ID = 2001L;
 
     @BeforeEach
     void removeUseFailureTrigger() {
         jdbcTemplate.execute("DROP TRIGGER IF EXISTS fail_used_history");
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS fail_used_notification");
+    }
+
+    @AfterEach
+    void removeLifecycleNotifications() {
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS fail_used_notification");
+        jdbcTemplate.update("DELETE FROM notification");
     }
 
     protected void insertIssuedCoupon(long issueId) {
