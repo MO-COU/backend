@@ -124,7 +124,8 @@ public class RedisCouponIssueGateway {
                 CouponRedisKey.stock(couponId),
                 CouponRedisKey.issuedMembers(couponId),
                 CouponRedisKey.metadata(couponId),
-                CouponRedisKey.issueStream(couponId));
+                CouponRedisKey.issueStream(couponId),
+                CouponRedisKey.issueResultCounts(couponId));
     }
 
     private List<String> createCompensationKeys(long couponId) {
