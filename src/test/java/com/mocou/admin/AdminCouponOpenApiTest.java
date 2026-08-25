@@ -24,6 +24,6 @@ class AdminCouponOpenApiTest {
         assertThat(operation.summary()).isEqualTo("Redis 발급 결과 누적 집계 조회");
         assertThat(Arrays.stream(responses.value())
                 .map(io.swagger.v3.oas.annotations.responses.ApiResponse::responseCode))
-                .containsExactlyInAnyOrder("200", "404", "503");
+                .containsExactlyInAnyOrder("200", "400", "404", "503");
     }
 }

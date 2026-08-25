@@ -43,6 +43,8 @@ public class AdminCouponController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "200", description = "Redis 발급 결과 집계 조회 성공"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400", description = "쿠폰 ID가 양수가 아님 (INVALID_INPUT)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "404", description = "쿠폰이 존재하지 않음 (COUPON_NOT_FOUND)"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "503", description = "Redis 조회 불가 (SERVICE_UNAVAILABLE)")
