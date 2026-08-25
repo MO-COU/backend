@@ -3,14 +3,10 @@ package com.mocou.loadtest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.mocou.global.exception.BusinessException;
-import com.mocou.global.exception.ErrorCode;
-import com.mocou.issue.CouponRedisKey;
-import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
-import com.mocou.support.MySqlContainerTest;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Map;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,6 +21,12 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
+
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
+import com.mocou.issue.CouponRedisKey;
+import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
+import com.mocou.support.MySqlContainerTest;
 
 /**
  * 되돌리기가 시연 회차에만 미치는지 확인한다.
@@ -105,6 +107,7 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
                 .set(CouponRedisKey.stock(DEMO_COUPON_ID), String.valueOf(TOTAL_QUANTITY - ISSUED_IN_LOAD_TEST));
         redisTemplate.opsForHash().put(CouponRedisKey.metadata(DEMO_COUPON_ID), "openAtEpochSecond", "1");
         redisTemplate.opsForSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "2", "3", "4");
+        redisTemplate.opsForHash().putAll(CouponRedisKey.issueResultCounts(DEMO_COUPON_ID),Map.of("RESERVED", String.valueOf(ISSUED_IN_LOAD_TEST),"SOLD_OUT", "2"));
     }
 
     @Test
@@ -258,6 +261,27 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
                 WHERE i.coupon_id = %d
                 """
                         .formatted(couponId));
+    }
+
+    @Test
+    @DisplayName("리셋 뒤 발급 결과 카운터는 새 회차 기준으로 다시 집계된다")
+    void clearsIssueResultCounts() {
+        // given
+        String counterKey = CouponRedisKey.issueResultCounts(DEMO_COUPON_ID);
+
+        assertThat(redisTemplate.opsForHash().get(counterKey, "RESERVED"))
+                .isEqualTo(String.valueOf(ISSUED_IN_LOAD_TEST));
+
+        // when
+        resetService.reset();
+
+        // then
+        assertThat(redisTemplate.hasKey(counterKey)).isFalse();
+
+        Long firstCount =
+                redisTemplate.opsForHash().increment(counterKey, "RESERVED", 1);
+
+        assertThat(firstCount).isEqualTo(1L);
     }
 
     private long count(String sql) {
