@@ -1,9 +1,13 @@
 package com.mocou.issue;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessException;
 
 public class RedisCouponIssueGatewayIntegrationTest
         extends RedisCouponIssueIntegrationTestSupport {
@@ -136,25 +140,44 @@ public class RedisCouponIssueGatewayIntegrationTest
     }
 
     @Test
-    @DisplayName("보상은 회원 제거와 재고 복구를 한 번만 수행한다")
+    @DisplayName("보상은 재고와 회원과 Counter를 한 번만 변경한다")
     void compensatesReservationOnlyOnce() {
         setStock(2);
-        gateway.reserve(COUPON_ID, 100L);
+
+        CouponReservationResult reservation =
+                gateway.reserveAndAppendEvent(
+                        COUPON_ID,
+                        100L,
+                        UUID.randomUUID());
 
         CouponCompensationResult first =
                 gateway.compensate(COUPON_ID, 100L);
         CouponCompensationResult second =
                 gateway.compensate(COUPON_ID, 100L);
 
+        assertThat(reservation)
+                .isEqualTo(CouponReservationResult.RESERVED);
         assertThat(first)
                 .isEqualTo(CouponCompensationResult.COMPENSATED);
         assertThat(second)
                 .isEqualTo(CouponCompensationResult.NOT_NEEDED);
+
         assertThat(currentStock()).isEqualTo("2");
         assertThat(redisTemplate.opsForSet().isMember(
                 issuedMembersKey(),
                 "100"))
                 .isFalse();
+
+        assertThat(issueResultCount("RESERVED"))
+                .isEqualTo(1L);
+        assertThat(issueResultCount("COMPENSATED"))
+                .isEqualTo(1L);
+
+        assertThat(
+                issueResultCount("RESERVED")
+                        - issueResultCount("COMPENSATED"))
+                .isEqualTo(redisTemplate.opsForSet().size(
+                        issuedMembersKey()));
     }
 
     @Test
@@ -168,4 +191,64 @@ public class RedisCouponIssueGatewayIntegrationTest
                         CouponCompensationResult
                                 .STOCK_NOT_INITIALIZED);
     }
+
+    @Test
+    @DisplayName("보상 Counter Key 타입이 잘못되면 예약 상태를 변경하지 않는다")
+    void rejectsWrongCompensationCounterType() {
+        setStock(1);
+
+        redisTemplate.opsForSet().add(
+                issuedMembersKey(),
+                "100");
+        redisTemplate.opsForValue().set(
+                issueResultCountsKey(),
+                "not-a-hash");
+
+        assertThatThrownBy(() ->
+                gateway.compensate(COUPON_ID, 100L))
+                .isInstanceOf(DataAccessException.class);
+
+        assertThat(currentStock()).isEqualTo("1");
+        assertThat(redisTemplate.opsForSet().isMember(
+                issuedMembersKey(),
+                "100"))
+                .isTrue();
+        assertThat(redisTemplate.opsForValue().get(
+                issueResultCountsKey()))
+                .isEqualTo("not-a-hash");
+    }
+
+    @Test
+    @DisplayName("보상 Counter 기록 실패 시 재고와 회원 상태를 원복한다")
+    void rollsBackCompensationWhenCounterUpdateFails() {
+        setStock(2);
+
+        gateway.reserveAndAppendEvent(
+                COUPON_ID,
+                100L,
+                UUID.randomUUID());
+
+        redisTemplate.opsForHash().put(
+                issueResultCountsKey(),
+                "COMPENSATED",
+                "not-a-number");
+
+        assertThatThrownBy(() ->
+                gateway.compensate(COUPON_ID, 100L))
+                .isInstanceOf(DataAccessException.class);
+
+        assertThat(currentStock()).isEqualTo("1");
+        assertThat(redisTemplate.opsForSet().isMember(
+                issuedMembersKey(),
+                "100"))
+                .isTrue();
+
+        assertThat(issueResultCount("RESERVED"))
+                .isEqualTo(1L);
+        assertThat(redisTemplate.opsForHash().get(
+                issueResultCountsKey(),
+                "COMPENSATED"))
+                .isEqualTo("not-a-number");
+    }
+
 }

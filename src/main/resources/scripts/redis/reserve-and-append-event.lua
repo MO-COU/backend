@@ -2,16 +2,45 @@
 -- KEYS[2]: coupon:{couponId}:issued-members
 -- KEYS[3]: coupon:{couponId}:metadata
 -- KEYS[4]: coupon:{couponId}:issue-stream
+-- KEYS[5]: coupon:{couponId}:issue-result-counts
 --
 -- ARGV[1]: memberId
 -- ARGV[2]: eventId
 -- ARGV[3]: couponId
 
+-- 결과 Counter Key가 존재한다면 Hash여야 한다
+local resultCountsType = redis.call('TYPE', KEYS[5]).ok
+
+if resultCountsType ~= 'none' and resultCountsType ~= 'hash' then
+    return redis.error_reply(
+        'coupon issue result counts key must be a hash'
+    )
+end
+
+-- Redis 예약 단계의 결과를 쿠폰별로 집계한다
+local function countAndReturn(field, result)
+    local countResult = redis.pcall(
+        'HINCRBY',
+        KEYS[5],
+        field,
+        1
+    )
+
+    if type(countResult) == 'table' and countResult.err then
+        return redis.error_reply(countResult.err)
+    end
+
+    return result
+end
+
 local stock = redis.call('GET', KEYS[1])
 
 -- 재고 Key가 초기화되지 않은 경우
 if not stock then
-    return -2
+    return countAndReturn(
+        'STOCK_NOT_INITIALIZED',
+        -2
+    )
 end
 
 local numericStock = tonumber(stock)
@@ -36,7 +65,10 @@ local closeAtEpochSecond = metadata[2]
 
 -- Metadata Key 또는 필드가 초기화되지 않은 경우
 if not openAtEpochSecond or not closeAtEpochSecond then
-    return -5
+    return countAndReturn(
+        'METADATA_NOT_INITIALIZED',
+        -5
+    )
 end
 
 local numericOpenAt = tonumber(openAtEpochSecond)
@@ -62,22 +94,34 @@ local currentEpochSecond = tonumber(redisTime[1])
 
 -- 아직 쿠폰 발급 시작 전
 if currentEpochSecond < numericOpenAt then
-    return -3
+    return countAndReturn(
+        'NOT_OPEN_YET',
+        -3
+    )
 end
 
 -- 종료 시각과 같거나 이후
 if currentEpochSecond >= numericCloseAt then
-    return -4
+    return countAndReturn(
+        'ISSUE_CLOSED',
+        -4
+    )
 end
 
 -- 이미 발급받은 회원인지 확인
 if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then
-    return -1
+    return countAndReturn(
+        'DUPLICATE_ISSUE',
+        -1
+    )
 end
 
 -- 재고가 소진된 경우
 if numericStock <= 0 then
-    return 0
+    return countAndReturn(
+        'SOLD_OUT',
+        0
+    )
 end
 
 -- 이벤트 식별자가 없으면 잘못된 요청
@@ -131,6 +175,22 @@ if type(streamEntryId) == 'table' and streamEntryId.err then
     redis.call('SREM', KEYS[2], ARGV[1])
 
     return redis.error_reply(streamEntryId.err)
+end
+
+local countResult = redis.pcall(
+    'HINCRBY',
+    KEYS[5],
+    'RESERVED',
+    1
+)
+
+-- Counter 기록 실패 시 예약과 Stream 이벤트까지 원복
+if type(countResult) == 'table' and countResult.err then
+    redis.call('INCR', KEYS[1])
+    redis.call('SREM', KEYS[2], ARGV[1])
+    redis.call('XDEL', KEYS[4], streamEntryId)
+
+    return redis.error_reply(countResult.err)
 end
 
 return 1
