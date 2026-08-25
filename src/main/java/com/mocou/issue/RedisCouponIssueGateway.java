@@ -131,7 +131,8 @@ public class RedisCouponIssueGateway {
     private List<String> createCompensationKeys(long couponId) {
         return List.of(
                 CouponRedisKey.stock(couponId),
-                CouponRedisKey.issuedMembers(couponId));
+                CouponRedisKey.issuedMembers(couponId),
+                CouponRedisKey.issueResultCounts(couponId));
     }
 
     private CouponReservationResult toReservationResult(long result) {
