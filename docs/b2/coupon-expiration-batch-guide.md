@@ -6,10 +6,12 @@
 
 ```text
 application.yml / 실행 옵션
-        ├─ scheduler-enabled, fixed-delay-ms → CouponExpirationScheduler
+        ├─ scheduler-enabled → ExpirationSchedulerProperties → ExpirationSchedulerState
+        ├─ fixed-delay-ms → CouponExpirationScheduler
         └─ chunk-size → CouponExpirationBatchProperties → CouponExpirationTasklet
 
 CouponExpirationScheduler
+        ├─ ExpirationSchedulerState가 OFF면 자동 실행 요청을 건너뜀
         ↓
 CouponExpirationJobLauncher
         ├─ 실행 중인 Job이면 건너뜀
@@ -28,7 +30,9 @@ CouponExpirationService → JdbcCouponExpirationRepository
 | 클래스 | 책임 |
 | --- | --- |
 | `CouponExpirationBatchProperties` | 청크 크기 설정값을 Tasklet에 전달한다. |
-| `CouponExpirationScheduler` | 설정된 주기마다 Job 실행을 요청한다. |
+| `ExpirationSchedulerProperties` | `scheduler-enabled` 설정값을 서버 시작 시 런타임 상태의 초기값으로 제공한다. |
+| `ExpirationSchedulerState` | API와 Scheduler가 공유하는 현재 자동 실행 상태를 관리한다. |
+| `CouponExpirationScheduler` | 설정된 주기마다 현재 상태를 확인하고, ON일 때만 Job 실행을 요청한다. |
 | `CouponExpirationJobLauncher` | 중복 실행 방지, 실패 Job 재시작, 새 Job 시작 정책을 처리한다. |
 | `ExpirationClock` / `JdbcExpirationClock` | 앱 서버 시간이 아닌 DB 시각을 만료 기준으로 제공한다. |
 | `CouponExpirationTasklet` | 고정된 `cutoffAt`과 청크 크기로 만료 처리를 반복한다. |
@@ -50,7 +54,7 @@ mocou:
 
 | 설정 | 기본값 | 변경 효과 |
 | --- | ---: | --- |
-| `scheduler-enabled` | `true` | `true`면 자동 스케줄을 실행하고, `false`면 자동 스케줄을 중지한다. |
+| `scheduler-enabled` | `true` | 서버 시작 시 자동 스케줄 상태의 초기값이다. 실행 중 상태 변경은 내부 API를 사용한다. |
 | `fixed-delay-ms` | `60000` | 이전 Job 실행이 끝난 뒤 다음 자동 실행까지 기다리는 시간(ms)이다. |
 | `chunk-size` | `2000` | 한 트랜잭션에서 조회·처리할 최대 만료 후보 수다. |
 
@@ -58,7 +62,8 @@ mocou:
 
 | 바꾸려는 대상 | 수정 위치 |
 | --- | --- |
-| 자동 실행 켜기·끄기 | `application.yml`의 `scheduler-enabled` |
+| 서버 시작 시 자동 실행 기본값 | `application.yml`의 `scheduler-enabled` |
+| 실행 중 자동 실행 켜기·끄기 | 내부 Scheduler Control API |
 | 자동 실행 주기 | `application.yml`의 `fixed-delay-ms` |
 | 청크 크기 | `application.yml`의 `chunk-size` |
 | Job 실행·재시작 정책 | `CouponExpirationJobLauncher` |
@@ -67,8 +72,28 @@ mocou:
 
 ## 테스트 위치
 
-- `CouponExpirationSchedulerConditionTest`: 자동 스케줄 설정에 따른 Scheduler Bean 등록 여부
+- `CouponExpirationSchedulerConditionTest`: Scheduler Bean 상시 등록과 설정값 기반 런타임 상태 초기화
 - `CouponExpirationSchedulerTest`: Scheduler가 Job 실행을 요청하는지
+- `ExpirationSchedulerControlControllerTest`: 자동 실행 상태 조회·변경과 입력 검증
 - `CouponExpirationJobLauncherTest`: 중복 실행 방지, 실패 재시작, DB 시각 기반 새 Job 시작
 - `CouponExpirationTaskletTest`: 청크 반복과 설정값 검증
 - `CouponExpirationServiceTest`, `CouponExpirationIntegrationTest`: 상태 전이와 이력 정합성
+
+## 런타임 Scheduler Control API
+
+만료 스케줄러는 서버를 재시작하지 않고 내부 API로 자동 실행 상태를 변경할 수 있다. 모든 응답은 공통 `ApiResponse<T>` 형식을 사용하므로, 아래 응답 본문의 `enabled`는 `data` 안에 담긴다.
+
+| API | 설명 |
+| --- | --- |
+| `GET /internal/lifecycle/expiration-scheduler` | 현재 자동 실행 상태를 조회한다. |
+| `PUT /internal/lifecycle/expiration-scheduler` | 요청 본문의 `enabled` 값으로 자동 실행 상태를 변경한다. |
+
+```json
+{
+  "enabled": false
+}
+```
+
+`enabled`를 생략하거나 `null`로 보내면 `400 Bad Request`와 공통 `INVALID_INPUT` 응답을 반환한다.
+
+OFF 요청은 이미 실행 중인 Job을 중단하지 않는다. 해당 Job은 정상 종료하고, 이후 스케줄 주기의 자동 실행 요청만 건너뛴다. 서버를 재시작하면 런타임 상태는 `scheduler-enabled` 설정값으로 다시 초기화된다.
