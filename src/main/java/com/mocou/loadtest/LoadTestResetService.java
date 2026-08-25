@@ -1,20 +1,23 @@
 package com.mocou.loadtest;
 
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
 import com.mocou.issue.CouponRedisKey;
 import com.mocou.issue.initialization.CouponRedisInitializationResult;
 import com.mocou.issue.initialization.CouponRedisInitializationService;
 import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 부하 테스트가 남긴 것을 지우고 시연 회차를 발급 직전 상태로 되돌린다.
@@ -105,8 +108,9 @@ public class LoadTestResetService {
     /**
      * 발급에 쓰이는 키를 모두 지운다.
      *
-     * <p>재고만 되돌리면 {@code issued-members}에 남은 회원이 다음 부하 테스트에서 중복으로 걸러진다. 스트림을 지우면
-     * 컨슈머 그룹도 함께 사라져 다음 실행에서 새로 만들어진다.
+     * <p>재고만 되돌리면 {@code issued-members}에 남은 회원이 다음 부하 테스트에서 중복으로 걸러진다.
+     * 결과 카운터를 남겨두면 이전 회차의 예약 성공·품절 결과가 다음 회차에 누적된다.
+     * 스트림을 지우면 컨슈머 그룹도 함께 사라지므로 초기화 단계에서 다시 생성한다.
      */
     private void deleteRedisKeys(long couponId) {
         redisTemplate.delete(
@@ -114,7 +118,8 @@ public class LoadTestResetService {
                         CouponRedisKey.stock(couponId),
                         CouponRedisKey.metadata(couponId),
                         CouponRedisKey.issuedMembers(couponId),
-                        CouponRedisKey.issueStream(couponId)));
+                        CouponRedisKey.issueStream(couponId),
+                        CouponRedisKey.issueResultCounts(couponId)));
     }
 
     /**
