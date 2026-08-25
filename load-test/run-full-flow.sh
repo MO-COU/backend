@@ -160,8 +160,6 @@ if command -v k6 >/dev/null 2>&1; then
     -e MEMBER_ID_START="${MEMBER_ID_START:-}" \
     -e MEMBER_ID="${MEMBER_ID:-}" \
     -e EXPECTED_STOCK="${EXPECTED_STOCK:-}" \
-    -e WORKER_VUS="${WORKER_VUS:-}" \
-    -e MAX_DURATION="${MAX_DURATION:-}" \
     -e REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-}" \
     "${TEST_FILE}"
 elif command -v docker >/dev/null 2>&1; then
@@ -173,8 +171,6 @@ elif command -v docker >/dev/null 2>&1; then
     -e MEMBER_ID_START="${MEMBER_ID_START:-}" \
     -e MEMBER_ID="${MEMBER_ID:-}" \
     -e EXPECTED_STOCK="${EXPECTED_STOCK:-}" \
-    -e WORKER_VUS="${WORKER_VUS:-}" \
-    -e MAX_DURATION="${MAX_DURATION:-}" \
     -e REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-}" \
     -v "$(pwd)/${RESULT_DIR}:/results" \
     grafana/k6 run --summary-export "/results/${TEST_LABEL}-summary.json" \
