@@ -79,7 +79,7 @@ k6 run -e TARGET=http://localhost:8080 -e COUPON_ID=301 -e VUS=20000 -e EXPECTED
 
 `EXPECTED_STOCK`은 실행 직전 Redis 재고와 같게 넣는다. 예를 들어 재고 1,000장에 2,000명이 요청하면 다음과 같다.
 
-`rush-issue.js`는 `VUS` 값을 총 요청 수로 사용한다. 기본 500개의 작업 VU가 요청 사이의 간격을 나눠 가지며 `RAMP_UP` 동안 정확히 해당 요청 수를 보낸다. 로컬 자원에 맞춰 `WORKER_VUS`를 조정할 수 있다.
+`rush-issue.js`는 `ramping-vus`로 0명에서 `VUS`명까지 `RAMP_UP` 동안 사용자를 늘린다. 각 VU는 `memberId` 하나를 배정받아 발급 요청을 한 번만 보내므로, 중복 없는 사용자 수와 총 요청 수는 `VUS`와 같다. 기본 조건은 사용자 20,000명, ramp-up 60초다.
 
 ```bash
 k6 run \
