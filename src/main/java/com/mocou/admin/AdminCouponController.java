@@ -30,4 +30,10 @@ public class AdminCouponController {
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(ApiResponse.success(service.getIssues(couponId, page, size)));
     }
+
+    @GetMapping("/{couponId}/issue-result-counts")
+    public ResponseEntity<ApiResponse<AdminCouponIssueResultCounts>> getIssueResultCounts(
+            @PathVariable long couponId) {
+        return ResponseEntity.ok(ApiResponse.success(service.getIssueResultCounts(couponId)));
+    }
 }
