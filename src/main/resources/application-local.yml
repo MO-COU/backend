@@ -19,3 +19,8 @@ spring:
 logging:
   level:
     com.mocou: DEBUG
+
+mocou:
+  cors:
+    # Vite dev server 기본 포트. 프론트가 다른 포트를 쓰면 여기 맞춰서 바꾼다.
+    allowed-origins: http://localhost:5173

@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+/** 조건부 만료 갱신에 성공한 발급 건에만 만료 이력을 함께 저장한다. */
 public class CouponExpirationService {
 
     private final CouponExpirationRepository repository;

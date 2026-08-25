@@ -23,10 +23,17 @@ import org.springframework.stereotype.Component;
 class IssueAllocator {
 
     /**
-     * 당첨자를 흩뜨리는 곱수. 회원 수와 서로소인 소수라, 순번 1..N이 서로 겹치지 않는 회원 번호로 흩어진다. 난수로 뽑고 충돌하면 다시
-     * 뽑는 방식은 쓰지 않는다. 재시도 횟수가 실행마다 달라지면 난수 소비량이 흔들려 재현성이 깨진다.
+     * 당첨자를 흩뜨리는 보폭. 순번이 1 늘어날 때 회원 번호가 건너뛰는 칸 수다.
+     *
+     * <p>난수로 뽑고 충돌하면 다시 뽑는 방식은 쓰지 않는다. 재시도 횟수가 실행마다 달라지면 난수 소비량이 흔들려 재현성이 깨진다.
+     *
+     * <p>보폭이 회원 수와 서로소이면 순번이 다를 때 회원 번호도 반드시 다르다. 다만 서로소는 충돌만 막을 뿐 잘 흩어지는지는 보장하지
+     * 않는다. 보폭이 회원 수의 간단한 분수 배수(1/2, 1/3 …)에 가까우면 금방 제자리로 돌아와 덩어리가 생긴다. 회원 100만 기준
+     * 황금비인 0.618…에 가장 가까운 소수를 쓰는 이유가 이것이다. 황금비는 어떤 분수로도 잘 근사되지 않아 가장 늦게까지 뭉치지 않는다.
+     *
+     * <p>소수라서 웬만한 회원 수와 자동으로 서로소가 되지만, 배수로 설정하면 깨지므로 {@link #requireCoprimeStride}로 막는다.
      */
-    private static final long MEMBER_STRIDE = 1_000_003L;
+    private static final long MEMBER_STRIDE = 618_041L;
 
     /** 회차마다 당첨자 명단이 달라지도록 시작점을 옮기는 곱수. */
     private static final long ROUND_OFFSET_STRIDE = 7_919L;
@@ -49,6 +56,7 @@ class IssueAllocator {
     List<IssueAllocation> allocate(int round, LocalDateTime openAt, LocalDateTime baseTime) {
         int stock = properties.roundStock();
         requireEnoughMembers(stock);
+        requireCoprimeStride();
 
         long firstIssueId = (long) (round - 1) * stock;
         long memberOffset = (round * ROUND_OFFSET_STRIDE) % properties.memberCount();
@@ -88,6 +96,33 @@ class IssueAllocator {
                     "회차 재고(%d)가 회원 수(%d)보다 많아 회차당 1인 1매를 지킬 수 없다"
                             .formatted(stock, properties.memberCount()));
         }
+    }
+
+    /**
+     * 보폭과 회원 수가 서로소인지 확인한다.
+     *
+     * <p>배수로 설정하면 한 회차의 모든 순번이 같은 회원 번호로 계산된다. 회원 수가 보폭과 같은 극단적인 경우 나머지가 항상 0이 되는
+     * 식이다. 그대로 두면 적재를 한참 진행한 뒤에야 {@code UNIQUE (coupon_id, member_id)} 위반으로 회차 트랜잭션이
+     * 롤백되므로, 900만 행을 쓰기 전에 여기서 막는다.
+     */
+    private void requireCoprimeStride() {
+        int memberCount = properties.memberCount();
+        long divisor = gcd(MEMBER_STRIDE, memberCount);
+        if (divisor != 1) {
+            throw new IllegalStateException(
+                    "회원 수(%d)가 당첨자 보폭(%d)과 서로소가 아니어서(최대공약수 %d) 회차당 1인 1매를 지킬 수 없다"
+                            .formatted(memberCount, MEMBER_STRIDE, divisor));
+        }
+    }
+
+    /** 유클리드 호제법. 나머지가 0이 될 때까지 나누면 마지막 나눈 수가 최대공약수다. */
+    private static long gcd(long a, long b) {
+        while (b != 0) {
+            long remainder = a % b;
+            a = b;
+            b = remainder;
+        }
+        return a;
     }
 
     /**

@@ -55,13 +55,15 @@ public class JdbcCouponUseRepository implements CouponUseRepository {
     public Optional<CouponIssueState> findIssue(long issueId) {
         return jdbcTemplate
                 .query(
-                        "SELECT coupon_issue_id, status, used_at, "
+                        "SELECT coupon_issue_id, coupon_id, member_id, status, used_at, "
                                 + "expires_at <= CURRENT_TIMESTAMP AS expired "
                                 + "FROM coupon_issue WHERE coupon_issue_id = ?",
                         (resultSet, rowNumber) -> {
                             Timestamp usedAt = resultSet.getTimestamp("used_at");
                             return new CouponIssueState(
                                     resultSet.getLong("coupon_issue_id"),
+                                    resultSet.getLong("coupon_id"),
+                                    resultSet.getLong("member_id"),
                                     CouponIssueStatus.valueOf(resultSet.getString("status")),
                                     usedAt == null ? null : usedAt.toLocalDateTime(),
                                     resultSet.getBoolean("expired"));

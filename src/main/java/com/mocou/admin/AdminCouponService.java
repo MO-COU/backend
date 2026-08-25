@@ -12,9 +12,13 @@ public class AdminCouponService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final AdminCouponRepository repository;
+    private final AdminCouponRealtimeStockRepository realtimeStockRepository;
 
-    public AdminCouponService(AdminCouponRepository repository) {
+    public AdminCouponService(
+            AdminCouponRepository repository,
+            AdminCouponRealtimeStockRepository realtimeStockRepository) {
         this.repository = repository;
+        this.realtimeStockRepository = realtimeStockRepository;
     }
 
     @Transactional(readOnly = true)
@@ -34,10 +38,25 @@ public class AdminCouponService {
     @Transactional(readOnly = true)
     public AdminCouponStock getStock(long couponId) {
         validateCouponId(couponId);
-        return repository
-                .findStock(couponId)
-                .orElseThrow(
-                        () -> new BusinessException(ErrorCode.COUPON_NOT_FOUND));
+        AdminCouponStock databaseStock =
+                repository
+                        .findStock(couponId)
+                        .orElseThrow(
+                                () -> new BusinessException(ErrorCode.COUPON_NOT_FOUND));
+        int databaseIssuedQuantity = Math.toIntExact(repository.countIssues(couponId));
+        try {
+            int realtimeRemainingQuantity =
+                    realtimeStockRepository
+                            .findRemainingQuantity(couponId)
+                            .stream()
+                            .findFirst()
+                            .orElse(databaseStock.remainingQuantity());
+            return databaseStock.withIssueProgress(
+                    realtimeRemainingQuantity, databaseIssuedQuantity);
+        } catch (ArithmeticException | IllegalArgumentException exception) {
+            throw new BusinessException(
+                    ErrorCode.SERVICE_UNAVAILABLE, "실시간 쿠폰 재고의 정합성이 맞지 않습니다");
+        }
     }
 
     private void validateRequest(long couponId, int page, int size) {
