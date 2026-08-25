@@ -15,12 +15,13 @@ class AdminCouponOpenApiTest {
     @Test
     @DisplayName("Redis 발급 결과 집계 조회의 Swagger 성공 및 오류 응답을 명세한다")
     void documentsIssueResultCountsOperation() throws Exception {
-        Tag tag = AdminCouponController.class.getAnnotation(Tag.class);
         Method method = AdminCouponController.class.getMethod("getIssueResultCounts", long.class);
+        Tag tag = method.getAnnotation(Tag.class);
         Operation operation = method.getAnnotation(Operation.class);
         ApiResponses responses = method.getAnnotation(ApiResponses.class);
 
-        assertThat(tag.name()).isEqualTo("Admin Coupon");
+        assertThat(AdminCouponController.class.getAnnotation(Tag.class)).isNull();
+        assertThat(tag.name()).isEqualTo("Issue Dashboard");
         assertThat(operation.summary()).isEqualTo("Redis 발급 결과 누적 집계 조회");
         assertThat(Arrays.stream(responses.value())
                 .map(io.swagger.v3.oas.annotations.responses.ApiResponse::responseCode))

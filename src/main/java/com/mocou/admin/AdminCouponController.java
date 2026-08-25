@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/admin/coupons")
-@Tag(name = "Admin Coupon", description = "관리자 쿠폰 조회 API")
 public class AdminCouponController {
 
     private final AdminCouponService service;
@@ -36,6 +35,7 @@ public class AdminCouponController {
     }
 
     @GetMapping("/{couponId}/issue-result-counts")
+    @Tag(name = "Issue Dashboard", description = "Redis 발급 현황 대시보드 API")
     @Operation(
             summary = "Redis 발급 결과 누적 집계 조회",
             description = "Redis가 Lua 스크립트로 집계한 쿠폰별 발급 결과의 현재 누적값을 조회합니다.")
