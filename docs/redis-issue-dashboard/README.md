@@ -16,7 +16,7 @@
 
 예약 보상은 `compensate-coupon.lua`에서 같은 Hash의 `COMPENSATED`를 증가시킨다.
 
-## Redis Hash 필드
+## 화면 카운터와 Redis Hash 필드
 
 | 필드 | 의미 | 요청·실패 합계 포함 |
 |---|---|---|
@@ -31,16 +31,88 @@
 
 누락된 Hash 필드는 0으로 해석한다. 음수·숫자가 아닌 값, 합산 오버플로, Redis 접근 실패는 API의 `SERVICE_UNAVAILABLE` 응답으로 변환한다.
 
+### 언제 증가하는가
+
+대시보드는 Redis Hash의 값을 계산하거나 추정하지 않는다. `reserve-and-append-event.lua`와 `compensate-coupon.lua`가 원자적으로 증가시킨 값을 API가 그대로 읽어 온다. 따라서 프론트에 항목이 항상 있어도 해당 상황의 요청이 없으면 값은 `0`이다.
+
+| 화면 항목 | 증가 조건 | 기본 k6 시나리오 |
+|---|---|---|
+| 발급 성공 (`RESERVED`) | 발급 기간 중, 재고가 있고, 해당 회원이 처음 발급을 요청 | 발생 |
+| 재고 소진 (`SOLD_OUT`) | 발급 기간 중 Redis 재고가 0 이하인 요청 | 발생 |
+| 중복 발급 (`DUPLICATE_ISSUE`) | 이미 `issued-members` Set에 있는 회원의 재요청 | 발생 |
+| 발급 시작 전 (`NOT_OPEN_YET`) | Redis 서버 시간이 `openAtEpochSecond`보다 이른 요청 | 기본 스크립트에서는 미발생 |
+| 발급 종료 (`ISSUE_CLOSED`) | Redis 서버 시간이 `closeAtEpochSecond`와 같거나 지난 요청 | 기본 스크립트에서는 미발생 |
+| 재고 미초기화 (`STOCK_NOT_INITIALIZED`) | `coupon:{couponId}:stock` 키가 없는 상태의 요청 | 정상 초기화된 기본 스크립트에서는 미발생 |
+| 메타데이터 미초기화 (`METADATA_NOT_INITIALIZED`) | 재고는 있으나 발급 시작·종료 시각 Hash 필드가 없는 요청 | 정상 초기화된 기본 스크립트에서는 미발생 |
+| 보상 처리 (`COMPENSATED`) | DB 동기화가 재시도 한도를 넘어 포기되어 이미 예약된 Redis 상태를 원복 | 정상 동기화에서는 미발생 |
+
+`STOCK_NOT_INITIALIZED`와 `METADATA_NOT_INITIALIZED`는 사용자 입력 오류가 아니라 Redis 발급 준비 누락·키 유실을 감지하는 운영 상태다. 두 경우 발급 API는 안전하게 `COUPON_ISSUE_NOT_READY`(503)로 거절한다.
+
+`COMPENSATED`는 새 요청의 실패가 아니다. Redis 예약 성공 뒤 Stream 소비자가 DB 반영을 반복 시도하고, 최대 재시도 횟수를 넘으면 해당 회원을 `issued-members` Set에서 제거하고 재고를 1 복구한다. 이 원복이 실제로 적용된 횟수만 증가하므로 전체 요청과 실패 합계에서는 제외한다.
+
 ## API와 화면 동작
 
 - API: `GET /api/admin/coupons/{couponId}/issue-result-counts`
-- 화면: `http://localhost:8080/issue-dashboard.html`
+- 로컬 데모 화면: `http://localhost:8080/issue-dashboard.html`
 - 기본 쿠폰 ID: `301`
 - 자동 갱신: 5초
 - 기본 테마: 라이트
 - 테마 선택: 브라우저 `localStorage`에 저장
 
 존재하지 않는 쿠폰은 404 `COUPON_NOT_FOUND`로 응답한다. 화면은 이를 네트워크 장애와 구분해 쿠폰 ID가 포함된 안내를 보여주고, 이전 쿠폰의 카운터가 남아 오해를 만들지 않도록 표시값을 0으로 초기화한다. 그 밖의 일시적 연결 오류는 마지막 정상 값을 유지하면서 오류 안내를 표시한다.
+
+### 요청과 응답
+
+쿠폰 ID는 양의 정수 path variable이며 요청 본문과 query parameter는 없다.
+
+```http
+GET /api/admin/coupons/4/issue-result-counts
+```
+
+성공하면 현재 Redis 누적값을 공통 응답 봉투로 반환한다. `totalRequests`는 `reserved + failed`이며, `failed`는 `SOLD_OUT`, `DUPLICATE_ISSUE`, `NOT_OPEN_YET`, `ISSUE_CLOSED`, `STOCK_NOT_INITIALIZED`, `METADATA_NOT_INITIALIZED`의 합이다. `compensated`는 별도 지표다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "couponId": 4,
+    "totalRequests": 12100,
+    "reserved": 10000,
+    "failed": 2100,
+    "soldOut": 2000,
+    "duplicateIssue": 100,
+    "notOpenYet": 0,
+    "issueClosed": 0,
+    "stockNotInitialized": 0,
+    "metadataNotInitialized": 0,
+    "compensated": 0
+  },
+  "error": null,
+  "traceId": "...",
+  "timestamp": "2026-08-25T12:00:00+09:00"
+}
+```
+
+쿠폰 ID가 0 이하이면 400 `INVALID_INPUT`, 존재하지 않는 쿠폰이면 404 `COUPON_NOT_FOUND`, Redis가 응답하지 않거나 Hash 값이 손상된 경우는 503 `SERVICE_UNAVAILABLE`을 반환한다.
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "COUPON_NOT_FOUND",
+    "message": "존재하지 않는 쿠폰입니다"
+  },
+  "traceId": "...",
+  "timestamp": "2026-08-25T12:00:00+09:00"
+}
+```
+
+Swagger UI에서도 같은 계약을 확인할 수 있다.
+
+```text
+http://localhost:8080/swagger-ui/index.html
+```
 
 ## 로컬 확인
 
@@ -55,6 +127,22 @@ k6 run load-test/issue-dashboard.js
 ```powershell
 k6 run -e COUPON_ID=4 load-test/issue-dashboard.js
 ```
+
+기본 시나리오는 테스트 시작 시 `/api/admin/load-test/reset`으로 대상 쿠폰 상태를 초기화한 뒤, 60초 동안 고유 회원 12,000건과 중복 회원 100건을 요청한다. 다른 요청이 없다면 결과는 `RESERVED` 10,000건, `SOLD_OUT` 2,000건, `DUPLICATE_ISSUE` 100건, 전체 요청 12,100건이다. 기간 밖 요청과 초기화 누락·보상은 이 기본 시나리오가 의도적으로 만들지 않는 운영 상태다.
+
+## 별도 프론트엔드와 dev 병합
+
+`src/main/resources/static`은 Spring Boot JAR에 포함되어 백엔드 컨테이너가 직접 제공한다. 실제 프론트엔드 서버가 별도로 있다면 이 디렉터리의 `issue-dashboard.*` 파일은 이슈 브랜치의 로컬 데모용으로만 유지하고 `dev` 배포 브랜치에는 병합하지 않는다.
+
+권장 절차는 백엔드·API·문서 커밋만 선택한 통합 브랜치를 만드는 것이다.
+
+```powershell
+git switch dev
+git switch -c feature/124-redis-issue-result-counters-backend
+git cherry-pick <Redis-집계-API-커밋> <Swagger-커밋> <문서-커밋>
+```
+
+정적 대시보드 파일을 추가한 커밋은 cherry-pick하지 않는다. 이후 이 통합 브랜치에서 `dev`로 PR을 만들면 JAR에 데모 화면이 들어가지 않고, 별도 프론트엔드는 위 API를 호출하면 된다. 일반 `git merge`는 feature 브랜치의 모든 파일 변경을 가져오므로 이 요구사항에는 사용하지 않는다.
 
 ## 한계
 
