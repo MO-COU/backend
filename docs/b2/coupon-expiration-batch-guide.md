@@ -31,7 +31,7 @@ CouponExpirationService → JdbcCouponExpirationRepository
 | --- | --- |
 | `CouponExpirationBatchProperties` | 청크 크기 설정값을 Tasklet에 전달한다. |
 | `ExpirationSchedulerProperties` | `scheduler-enabled` 설정값을 서버 시작 시 런타임 상태의 초기값으로 제공한다. |
-| `ExpirationSchedulerState` | API와 Scheduler가 공유하는 현재 자동 실행 상태를 관리한다. |
+| `ExpirationSchedulerState` | 단일 애플리케이션 인스턴스에서 API와 Scheduler가 공유하는 현재 자동 실행 상태를 관리한다. |
 | `CouponExpirationScheduler` | 설정된 주기마다 현재 상태를 확인하고, ON일 때만 Job 실행을 요청한다. |
 | `CouponExpirationJobLauncher` | 중복 실행 방지, 실패 Job 재시작, 새 Job 시작 정책을 처리한다. |
 | `ExpirationClock` / `JdbcExpirationClock` | 앱 서버 시간이 아닌 DB 시각을 만료 기준으로 제공한다. |
@@ -96,4 +96,10 @@ mocou:
 
 `enabled`를 생략하거나 `null`로 보내면 `400 Bad Request`와 공통 `INVALID_INPUT` 응답을 반환한다.
 
-OFF 요청은 이미 실행 중인 Job을 중단하지 않는다. 해당 Job은 정상 종료하고, 이후 스케줄 주기의 자동 실행 요청만 건너뛴다. 서버를 재시작하면 런타임 상태는 `scheduler-enabled` 설정값으로 다시 초기화된다.
+OFF 요청은 이미 실행 중인 Job을 중단하지 않으며, 해당 Job을 기다리지 않고 즉시 상태를 변경한다. 이미 상태 확인을 통과한 스케줄 호출 1건은 Job 시작을 요청할 수 있지만, 그 이후 스케줄 주기의 자동 실행 요청은 건너뛴다. 서버를 재시작하면 런타임 상태는 `scheduler-enabled` 설정값으로 다시 초기화된다.
+
+## 운영 범위
+
+현재 상태는 애플리케이션 메모리에만 있으므로 **단일 애플리케이션 인스턴스**에서만 사용한다. Redis가 별도 서버나 컨테이너에 있어도 app 인스턴스가 하나라면 동작에 영향을 주지 않는다.
+
+app 인스턴스를 여러 대로 늘릴 때는 Redis 등에 상태를 공유하고, 여러 Scheduler가 동시에 Job을 시작하지 않도록 분산 락을 추가해야 한다. 이 경우 Redis 상태는 재시작 뒤에도 남으므로, 현재의 "재시작 시 `scheduler-enabled`로 복원" 정책도 함께 재설계한다.
