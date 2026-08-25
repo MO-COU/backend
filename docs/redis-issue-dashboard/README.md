@@ -130,19 +130,15 @@ k6 run -e COUPON_ID=4 load-test/issue-dashboard.js
 
 기본 시나리오는 테스트 시작 시 `/api/admin/load-test/reset`으로 대상 쿠폰 상태를 초기화한 뒤, 60초 동안 고유 회원 12,000건과 중복 회원 100건을 요청한다. 다른 요청이 없다면 결과는 `RESERVED` 10,000건, `SOLD_OUT` 2,000건, `DUPLICATE_ISSUE` 100건, 전체 요청 12,100건이다. 기간 밖 요청과 초기화 누락·보상은 이 기본 시나리오가 의도적으로 만들지 않는 운영 상태다.
 
-## 별도 프론트엔드와 dev 병합
+### VU가 아닌 요청률 방식인 이유
 
-`src/main/resources/static`은 Spring Boot JAR에 포함되어 백엔드 컨테이너가 직접 제공한다. 실제 프론트엔드 서버가 별도로 있다면 이 디렉터리의 `issue-dashboard.*` 파일은 이슈 브랜치의 로컬 데모용으로만 유지하고 `dev` 배포 브랜치에는 병합하지 않는다.
+고유 회원 발급 시나리오는 `constant-arrival-rate`로 초당 `REQUEST_RATE`(기본 200)건을 60초 동안 시작한다. 따라서 다른 요청이 없고 dropped iteration이 없다면 정확히 12,000번의 고유 회원 발급을 시도한다. 재고 10,000건을 기준으로 발급 성공 10,000건과 재고 소진 2,000건이라는 대시보드 기대값을 계산·비교할 수 있다.
 
-권장 절차는 백엔드·API·문서 커밋만 선택한 통합 브랜치를 만드는 것이다.
+VU 기반 executor는 "동시에 몇 명이 반복 요청하는가"를 정할 뿐, 응답 시간이 달라지면 같은 시간 동안 만들어지는 요청 수가 바뀐다. 이 대시보드는 Redis 집계가 정해진 요청량과 일치하는지 확인하는 목적이므로, 동시 사용자 수보다 요청 시작률을 고정하는 방식이 적합하다.
 
-```powershell
-git switch dev
-git switch -c feature/124-redis-issue-result-counters-backend
-git cherry-pick <Redis-집계-API-커밋> <Swagger-커밋> <문서-커밋>
-```
+`preAllocatedVUs=100`, `maxVUs=1000`은 요청률을 처리하기 위한 k6 실행 자원이다. 부하 기준이 100 또는 1,000명의 사용자는 아니다. 서버가 느려져 필요한 VU가 `maxVUs`를 넘으면 k6가 iteration을 시작하지 못할 수 있으므로, 실행 결과의 `dropped_iterations`도 함께 확인해야 한다.
 
-정적 대시보드 파일을 추가한 커밋은 cherry-pick하지 않는다. 이후 이 통합 브랜치에서 `dev`로 PR을 만들면 JAR에 데모 화면이 들어가지 않고, 별도 프론트엔드는 위 API를 호출하면 된다. 일반 `git merge`는 feature 브랜치의 모든 파일 변경을 가져오므로 이 요구사항에는 사용하지 않는다.
+중복 발급 시나리오만은 같은 회원 ID로 정확히 100번 요청하는 것이 목적이므로 `shared-iterations`를 사용한다. 이때 `vus=5`는 100건을 병렬로 보낼 실행 수이고, 요청 총량은 `iterations=100`으로 고정된다.
 
 ## 한계
 
