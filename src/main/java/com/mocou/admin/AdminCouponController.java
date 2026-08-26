@@ -41,7 +41,7 @@ public class AdminCouponController {
             description = "Redis 발급 결과 누적값과 DB 적재 진행을 함께 조회합니다.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                responseCode = "200", description = "Redis 발급 결과 집계 조회 성공"),
+                responseCode = "200", description = "발급 결과와 DB 적재 진행 조회 성공"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "400", description = "쿠폰 ID가 양수가 아님 (INVALID_INPUT)"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
