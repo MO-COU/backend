@@ -50,13 +50,13 @@ public class AdminCouponController {
     }
 
     @GetMapping("/{couponId}/issue-result-counts")
-    @Tag(name = "Issue Dashboard", description = "Redis 발급 현황 대시보드 API")
+    @Tag(name = "Issue Results", description = "Redis 발급 결과와 DB 적재 진행 조회 API")
     @Operation(
-            summary = "Redis 발급 결과 누적 집계 조회",
-            description = "Redis가 Lua 스크립트로 집계한 쿠폰별 발급 결과의 현재 누적값을 조회합니다.")
+            summary = "발급 결과와 DB 적재 진행 조회",
+            description = "Redis 발급 결과 누적값과 DB 적재 진행을 함께 조회합니다.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                responseCode = "200", description = "Redis 발급 결과 집계 조회 성공"),
+                responseCode = "200", description = "발급 결과와 DB 적재 진행 조회 성공"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "400", description = "쿠폰 ID가 양수가 아님 (INVALID_INPUT)"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(

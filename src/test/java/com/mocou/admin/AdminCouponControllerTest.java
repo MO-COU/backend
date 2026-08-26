@@ -110,7 +110,8 @@ class AdminCouponControllerTest {
         given(service.getIssueResultCounts(COUPON_ID))
                 .willReturn(
                         AdminCouponIssueResultCounts.of(
-                                COUPON_ID, 8_320, 1_200, 420, 30, 30, 0, 0, 20));
+                                        COUPON_ID, 8_320, 1_200, 420, 30, 30, 0, 0, 20)
+                                .withPersistenceProgress(7_980));
 
         // when, then
         mockMvc.perform(
@@ -127,6 +128,8 @@ class AdminCouponControllerTest {
                 .andExpect(jsonPath("$.data.duplicateIssue").value(420))
                 .andExpect(jsonPath("$.data.notOpenYet").value(30))
                 .andExpect(jsonPath("$.data.issueClosed").value(30))
+                .andExpect(jsonPath("$.data.dbPersisted").value(7_980))
+                .andExpect(jsonPath("$.data.pendingOrRetrying").value(320))
                 .andExpect(jsonPath("$.data.compensated").value(20));
     }
 
