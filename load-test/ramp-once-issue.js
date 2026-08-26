@@ -115,6 +115,6 @@ export function handleSummary(data) {
   };
   return {
     stdout: `MOCOU_RESULT=${JSON.stringify(result)}\n`,
-    [__ENV.SUMMARY_FILE || 'summary.json']: JSON.stringify(data),
+    [__ENV.SUMMARY_FILE || 'summary.json']: JSON.stringify(result),
   };
 }
