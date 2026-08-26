@@ -104,6 +104,8 @@ MODE=smoke COUPON_ID=301 VERIFY_DB=true VERIFY_REDIS=true \
 | duplicate | 동일 회원 중복 방어 확인 | DB 중복 0건 |
 | rush | 20,000명 최종 부하와 정합성 확인 | 아래 완료 기준 전부 충족 |
 
+`rush`는 `ramping-vus`로 60초 동안 중복 없는 사용자를 0명에서 20,000명까지 늘린다. 각 사용자는 발급 API를 한 번만 호출한다.
+
 최종 완판 테스트는 테스트 시작 전 DB 건수를 기준으로 신규 10,000건이 반영될 때까지 기다리도록 기대값을 지정한다.
 
 ```bash

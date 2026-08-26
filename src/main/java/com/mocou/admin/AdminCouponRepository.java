@@ -7,6 +7,9 @@ public interface AdminCouponRepository {
 
     boolean existsCoupon(long couponId);
 
+    /** 대시보드 목록. 최근 회차가 먼저 온다. */
+    List<AdminCouponSummary> findAllSummaries();
+
     Optional<AdminCouponStock> findStock(long couponId);
 
     long countIssues(long couponId);

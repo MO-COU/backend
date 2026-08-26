@@ -25,7 +25,26 @@ class AdminCouponServiceTest {
 
     @Mock private AdminCouponRepository repository;
     @Mock private AdminCouponRealtimeStockRepository realtimeStockRepository;
+    @Mock private RedisAdminCouponIssueResultRepository issueResultRepository;
     @InjectMocks private AdminCouponService service;
+
+    @Test
+    @DisplayName("존재하는 쿠폰의 실시간 발급 결과를 조회한다")
+    void returnsRealtimeIssueResultCounts() {
+        // given
+        AdminCouponIssueResultCounts counts =
+                AdminCouponIssueResultCounts.of(COUPON_ID, 8_320, 1_200, 420, 30, 30, 0, 0, 20);
+        given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(repository.countIssues(COUPON_ID)).willReturn(7_980L);
+        given(issueResultRepository.findCounts(COUPON_ID)).willReturn(counts);
+
+        // when
+        AdminCouponIssueResultCounts result = service.getIssueResultCounts(COUPON_ID);
+
+        // then
+        assertThat(result.dbPersisted()).isEqualTo(7_980);
+        assertThat(result.pendingOrRetrying()).isEqualTo(320);
+    }
 
     @Test
     @DisplayName("쿠폰 발급 이력을 페이지 단위로 조회한다")
@@ -176,6 +195,40 @@ class AdminCouponServiceTest {
                                 assertThat(exception.getErrorCode())
                                         .isEqualTo(ErrorCode.INVALID_INPUT));
         verify(repository, never()).existsCoupon(COUPON_ID);
+    }
+
+    @Test
+    @DisplayName("회차 목록을 저장소가 준 순서 그대로 돌려준다")
+    void returnsCouponSummaries() {
+        // given - 최근 회차가 먼저 오도록 정렬하는 책임은 저장소에 있다
+        AdminCouponSummary latest =
+                new AdminCouponSummary(
+                        302L,
+                        "아메리카노 무료 쿠폰 302회차",
+                        LocalDateTime.of(2026, 8, 26, 10, 0),
+                        LocalDateTime.of(2026, 8, 26, 23, 59, 59),
+                        10_000,
+                        "OPEN");
+        AdminCouponSummary previous =
+                new AdminCouponSummary(
+                        301L,
+                        "아메리카노 무료 쿠폰 301회차",
+                        LocalDateTime.of(2026, 8, 25, 10, 0),
+                        LocalDateTime.of(2026, 8, 25, 23, 59, 59),
+                        10_000,
+                        "CLOSED");
+        given(repository.findAllSummaries()).willReturn(List.of(latest, previous));
+
+        // when & then
+        assertThat(service.getCoupons()).containsExactly(latest, previous);
+    }
+
+    @Test
+    @DisplayName("회차가 하나도 없으면 빈 목록을 돌려준다")
+    void returnsEmptyListWhenNoCouponExists() {
+        given(repository.findAllSummaries()).willReturn(List.of());
+
+        assertThat(service.getCoupons()).isEmpty();
     }
 
 }

@@ -1,5 +1,6 @@
 -- KEYS[1]: coupon:{couponId}:stock
 -- KEYS[2]: coupon:{couponId}:issued-members
+-- KEYS[3]: coupon:{couponId}:issue-result-counts
 -- ARGV[1]: memberId
 
 -- 재고 Key가 존재하지 않는 경우
@@ -7,11 +8,65 @@ if redis.call('EXISTS', KEYS[1]) == 0 then
     return -2
 end
 
--- 회원이 실제로 제거된 경우에만 재고 복구
-if redis.call('SREM', KEYS[2], ARGV[1]) == 1 then
-    redis.call('INCR', KEYS[1])
-    return 1
+-- 결과 Counter Key가 존재한다면 Hash여야 한다
+local resultCountsType = redis.call('TYPE', KEYS[3]).ok
+
+if resultCountsType ~= 'none'
+        and resultCountsType ~= 'hash' then
+    return redis.error_reply(
+        'coupon issue result counts key must be a hash'
+    )
 end
 
+-- 회원이 실제로 예약된 상태일 때만 보상한다
+local removed = redis.call(
+    'SREM',
+    KEYS[2],
+    ARGV[1]
+)
+
 -- 이미 보상됐거나 해당 회원의 예약이 없는 경우
-return 0
+if removed == 0 then
+    return 0
+end
+
+-- Redis 재고 복구
+local stockResult = redis.pcall(
+    'INCR',
+    KEYS[1]
+)
+
+-- 재고 복구 실패 시 제거했던 회원을 다시 등록
+if type(stockResult) == 'table'
+        and stockResult.err then
+    redis.call(
+        'SADD',
+        KEYS[2],
+        ARGV[1]
+    )
+
+    return redis.error_reply(stockResult.err)
+end
+
+-- 실제 적용된 보상 횟수 집계
+local countResult = redis.pcall(
+    'HINCRBY',
+    KEYS[3],
+    'COMPENSATED',
+    1
+)
+
+-- Counter 기록 실패 시 재고와 회원 정보를 보상 전 상태로 원복
+if type(countResult) == 'table'
+        and countResult.err then
+    redis.call('DECR', KEYS[1])
+    redis.call(
+        'SADD',
+        KEYS[2],
+        ARGV[1]
+    )
+
+    return redis.error_reply(countResult.err)
+end
+
+return 1

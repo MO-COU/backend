@@ -3,14 +3,10 @@ package com.mocou.loadtest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.mocou.global.exception.BusinessException;
-import com.mocou.global.exception.ErrorCode;
-import com.mocou.issue.CouponRedisKey;
-import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
-import com.mocou.support.MySqlContainerTest;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Map;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,6 +21,12 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
+
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
+import com.mocou.issue.CouponRedisKey;
+import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
+import com.mocou.support.MySqlContainerTest;
 
 /**
  * 되돌리기가 시연 회차에만 미치는지 확인한다.
@@ -105,13 +107,14 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
                 .set(CouponRedisKey.stock(DEMO_COUPON_ID), String.valueOf(TOTAL_QUANTITY - ISSUED_IN_LOAD_TEST));
         redisTemplate.opsForHash().put(CouponRedisKey.metadata(DEMO_COUPON_ID), "openAtEpochSecond", "1");
         redisTemplate.opsForSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "2", "3", "4");
+        redisTemplate.opsForHash().putAll(CouponRedisKey.issueResultCounts(DEMO_COUPON_ID),Map.of("RESERVED", String.valueOf(ISSUED_IN_LOAD_TEST),"SOLD_OUT", "2"));
     }
 
     @Test
     @DisplayName("시연 회차의 발급과 부산물이 사라지고 재고가 되돌아온다")
     void clearsDemoRoundAndRestoresStock() {
         // when
-        LoadTestResetResult result = resetService.reset();
+        LoadTestResetResult result = resetService.reset(DEMO_COUPON_ID);
 
         // then
         assertThat(result.couponId()).isEqualTo(DEMO_COUPON_ID);
@@ -130,7 +133,7 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
     @DisplayName("지난 회차의 발급과 이력은 그대로 남는다")
     void keepsPastRoundsUntouched() {
         // when
-        resetService.reset();
+        resetService.reset(DEMO_COUPON_ID);
 
         // then
         assertThat(countIssues(PAST_COUPON_ID)).isEqualTo(1);
@@ -142,7 +145,7 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
     @DisplayName("검증 기록은 전부 사라진다")
     void clearsVerificationRecords() {
         // when
-        LoadTestResetResult result = resetService.reset();
+        LoadTestResetResult result = resetService.reset(DEMO_COUPON_ID);
 
         // then - 어느 검증이 이 회차를 본 것인지 골라낼 수 없어 전부 지운다
         assertThat(result.deletedVerificationRuns()).isEqualTo(1);
@@ -153,7 +156,7 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
     @DisplayName("Redis 키가 지워지고 DB 재고로 다시 세워진다")
     void rebuildsRedisFromDatabase() {
         // when
-        resetService.reset();
+        resetService.reset(DEMO_COUPON_ID);
 
         // then - 초기화 스크립트가 기존 키를 덮어쓰지 않으므로 먼저 지워야 이 값이 나온다
         assertThat(redisTemplate.opsForValue().get(CouponRedisKey.stock(DEMO_COUPON_ID)))
@@ -179,7 +182,7 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
                 .createGroup(streamKey, ReadOffset.from("0"), RedisCouponIssueSyncGateway.GROUP_NAME);
 
         // when
-        resetService.reset();
+        resetService.reset(DEMO_COUPON_ID);
 
         // then - 스트림은 비워졌지만 그룹은 다시 만들어져 있어야 한다
         assertThat(redisTemplate.opsForStream().size(streamKey)).isZero();
@@ -187,33 +190,50 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
                 .anyMatch(group -> RedisCouponIssueSyncGateway.GROUP_NAME.equals(group.groupName()));
     }
 
+    /**
+     * 지난 회차에는 검증 대상인 발급 300만 건이 들어 있다. 되돌리면 복구할 방법이 전체 재적재뿐이라 지정 자체를 막는다.
+     *
+     * <p>처음에는 파라미터를 받지 않고 {@code OPEN}인 쿠폰 하나를 서버가 찾는 방식이었다. 회차를 직접 만들 수 있게 되면서
+     * {@code OPEN}이 여럿이 되어 그 방식으로는 대상을 특정할 수 없다. 대신 이 검사가 같은 사고를 막는다.
+     */
     @Test
-    @DisplayName("발급을 여는 쿠폰이 없으면 거부한다")
-    void rejectsWhenNoOpenCoupon() {
-        // given
-        jdbcTemplate.update("UPDATE coupon SET status = 'CLOSED' WHERE coupon_id = ?", DEMO_COUPON_ID);
-
+    @DisplayName("종료된 회차는 되돌릴 수 없다")
+    void rejectsClosedRound() {
         // when, then
-        assertThatThrownBy(() -> resetService.reset())
+        assertThatThrownBy(() -> resetService.reset(PAST_COUPON_ID))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.LOAD_TEST_TARGET_NOT_UNIQUE);
+                .isEqualTo(ErrorCode.LOAD_TEST_TARGET_CLOSED);
+
+        // 거부했으면 아무것도 지우지 않았어야 한다
+        assertThat(countIssues(PAST_COUPON_ID)).isEqualTo(1);
+        assertThat(countHistories(PAST_COUPON_ID)).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("발급을 여는 쿠폰이 둘 이상이면 거부한다")
-    void rejectsWhenMultipleOpenCoupons() {
-        // given - 어느 쪽을 되돌릴지 서버가 정할 수 없다
-        jdbcTemplate.update("UPDATE coupon SET status = 'OPEN' WHERE coupon_id = ?", PAST_COUPON_ID);
-
+    @DisplayName("없는 쿠폰을 지정하면 거부한다")
+    void rejectsUnknownCoupon() {
         // when, then
-        assertThatThrownBy(() -> resetService.reset())
+        assertThatThrownBy(() -> resetService.reset(9999))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.LOAD_TEST_TARGET_NOT_UNIQUE);
+                .isEqualTo(ErrorCode.COUPON_NOT_FOUND);
+    }
 
-        // 거부했으면 아무것도 지우지 않았어야 한다
-        assertThat(countIssues(DEMO_COUPON_ID)).isEqualTo(ISSUED_IN_LOAD_TEST);
+    /** 회차를 직접 만들 수 있게 되면서 생긴 상황이다. 지정한 회차만 되돌아가야 한다. */
+    @Test
+    @DisplayName("발급을 여는 회차가 여럿이어도 지정한 것만 되돌린다")
+    void resetsOnlyTheGivenRoundAmongManyOpenOnes() {
+        // given - 지난 회차도 열어 OPEN을 둘로 만든다
+        jdbcTemplate.update("UPDATE coupon SET status = 'OPEN' WHERE coupon_id = ?", PAST_COUPON_ID);
+
+        // when
+        LoadTestResetResult result = resetService.reset(DEMO_COUPON_ID);
+
+        // then
+        assertThat(result.couponId()).isEqualTo(DEMO_COUPON_ID);
+        assertThat(countIssues(DEMO_COUPON_ID)).isZero();
+        assertThat(countIssues(PAST_COUPON_ID)).isEqualTo(1);
     }
 
     /**
@@ -238,7 +258,7 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
         redisTemplate.opsForStream().delete(streamKey, recordId);
 
         // when, then
-        assertThatThrownBy(() -> resetService.reset())
+        assertThatThrownBy(() -> resetService.reset(DEMO_COUPON_ID))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS);
@@ -258,6 +278,27 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
                 WHERE i.coupon_id = %d
                 """
                         .formatted(couponId));
+    }
+
+    @Test
+    @DisplayName("리셋 뒤 발급 결과 카운터는 새 회차 기준으로 다시 집계된다")
+    void clearsIssueResultCounts() {
+        // given
+        String counterKey = CouponRedisKey.issueResultCounts(DEMO_COUPON_ID);
+
+        assertThat(redisTemplate.opsForHash().get(counterKey, "RESERVED"))
+                .isEqualTo(String.valueOf(ISSUED_IN_LOAD_TEST));
+
+        // when
+        resetService.reset(DEMO_COUPON_ID);
+
+        // then
+        assertThat(redisTemplate.hasKey(counterKey)).isFalse();
+
+        Long firstCount =
+                redisTemplate.opsForHash().increment(counterKey, "RESERVED", 1);
+
+        assertThat(firstCount).isEqualTo(1L);
     }
 
     private long count(String sql) {

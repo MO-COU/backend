@@ -15,18 +15,6 @@ const COUPON_ID = __ENV.COUPON_ID || '301';
 const RAMP_UP = __ENV.RAMP_UP || '60s';
 const VUS = Number(__ENV.VUS || '20000');
 const EXPECTED_STOCK = Number(__ENV.EXPECTED_STOCK || '10000');
-const WORKER_VUS = Number(__ENV.WORKER_VUS || String(Math.min(VUS, 500)));
-
-function durationSeconds(duration) {
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(duration);
-  if (!match) {
-    throw new Error(`RAMP_UP 형식이 올바르지 않습니다: ${duration}`);
-  }
-
-  const value = Number(match[1]);
-  const unitSeconds = { ms: 0.001, s: 1, m: 60, h: 3600 };
-  return value * unitSeconds[match[2]];
-}
 
 if (!Number.isInteger(VUS) || VUS <= 0) {
   throw new Error(`VUS는 양의 정수여야 합니다: ${__ENV.VUS}`);
@@ -38,13 +26,9 @@ if (!Number.isInteger(EXPECTED_STOCK) || EXPECTED_STOCK < 0) {
   );
 }
 
-if (!Number.isInteger(WORKER_VUS) || WORKER_VUS <= 0 || WORKER_VUS > VUS) {
-  throw new Error(`WORKER_VUS는 1 이상 VUS(${VUS}) 이하여야 합니다: ${WORKER_VUS}`);
-}
-
 const expectedSuccess = Math.min(VUS, EXPECTED_STOCK);
 const expectedSoldOut = Math.max(VUS - EXPECTED_STOCK, 0);
-const requestIntervalSeconds = durationSeconds(RAMP_UP) * WORKER_VUS / VUS;
+let requested = false;
 
 // 202는 발급 예약 성공이고 409는 품절/중복에 따른 정상적인 발급 거절이다.
 // 409를 예상 응답으로 등록하지 않으면 k6가 품절 요청까지 서버 장애로 집계한다.
@@ -55,11 +39,15 @@ http.setResponseCallback(
 export const options = {
   scenarios: {
     rush: {
-      // 요청 수를 고정하고 WORKER_VUS가 RAMP_UP 동안 나눠 보낸다.
-      executor: 'shared-iterations',
-      vus: WORKER_VUS,
-      iterations: VUS,
-      maxDuration: __ENV.MAX_DURATION || '10m',
+      // 중복 없는 사용자가 0명에서 VUS명까지 RAMP_UP 동안 증가한다.
+      executor: 'ramping-vus',
+      startVUs: 0,
+      stages: [
+        { duration: RAMP_UP, target: VUS },
+        // 마지막에 도착한 사용자도 한 번은 요청할 시간을 둔다.
+        { duration: '1s', target: VUS },
+      ],
+      gracefulRampDown: '30s',
     },
   },
 
@@ -78,11 +66,15 @@ export const options = {
 };
 
 export default function () {
-  sleep(requestIntervalSeconds);
+  // ramping-vus는 함수를 반복하므로 사용자마다 발급 요청은 한 번만 보낸다.
+  if (requested) {
+    sleep(1);
+    return;
+  }
+  requested = true;
 
   const memberIdStart = Number(__ENV.MEMBER_ID_START || '1');
-  // 회원 ID가 겹치지 않게 한다.
-  const memberId = memberIdStart + exec.scenario.iterationInTest;
+  const memberId = memberIdStart + exec.vu.idInTest - 1;
 
   const url = `${TARGET}/api/coupons/${COUPON_ID}/issues`;
   const payload = JSON.stringify({ memberId });

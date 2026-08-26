@@ -30,6 +30,14 @@ public final class CouponRedisKey {
         return "coupon:{%d}:issue-stream".formatted(couponId);
     }
 
+    /**
+     * Redis 예약 단계의 결과별 요청 수를 저장하는 Hash Key.
+     */
+    public static String issueResultCounts(long couponId) {
+        validateCouponId(couponId);
+        return "coupon:{%d}:issue-result-counts".formatted(couponId);
+    }
+
     private static void validateCouponId(long couponId) {
         if (couponId <= 0) {
             throw new IllegalArgumentException("couponId는 양수여야 합니다.");

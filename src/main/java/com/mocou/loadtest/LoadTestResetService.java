@@ -1,20 +1,22 @@
 package com.mocou.loadtest;
 
+import java.util.Objects;
+import java.util.Set;
+
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
 import com.mocou.issue.CouponRedisKey;
 import com.mocou.issue.initialization.CouponRedisInitializationResult;
 import com.mocou.issue.initialization.CouponRedisInitializationService;
 import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 부하 테스트가 남긴 것을 지우고 시연 회차를 발급 직전 상태로 되돌린다.
@@ -27,6 +29,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 @RequiredArgsConstructor
 public class LoadTestResetService {
 
+    /** 지난 회차에는 검증 대상인 더미데이터가 들어 있어 되돌리면 안 된다. */
+    private static final String CLOSED_STATUS = "CLOSED";
+
     private final LoadTestResetRepository repository;
     private final CouponRedisInitializationService redisInitializationService;
     private final StringRedisTemplate redisTemplate;
@@ -38,8 +43,8 @@ public class LoadTestResetService {
      *
      * @throws BusinessException 대상을 특정할 수 없거나 아직 DB로 반영되지 않은 발급이 남아 있으면
      */
-    public LoadTestResetResult reset() {
-        long couponId = resolveTarget();
+    public LoadTestResetResult reset(long couponId) {
+        rejectIfNotResettable(couponId);
         rejectIfSyncInProgress(couponId);
 
         deleteRedisKeys(couponId);
@@ -57,21 +62,26 @@ public class LoadTestResetService {
     }
 
     /**
-     * 되돌릴 쿠폰을 찾는다.
+     * 되돌려도 되는 회차인지 본다.
      *
-     * <p>호출한 쪽이 지정하지 않는다. 파라미터로 받으면 지난 회차를 지정할 수 있게 되고, 그 회차에는 검증 대상인 발급 300만 건이
-     * 들어 있다. 오타 한 글자에 되돌릴 수 없는 삭제가 일어난다.
+     * <p>처음에는 대상을 받지 않고 {@code OPEN}인 쿠폰 하나를 서버가 찾았다. 오타 한 글자에 지난 회차를 지목하면 검증 대상인
+     * 발급 300만 건이 사라지기 때문이었다. <b>회차를 직접 만들 수 있게 되면서 {@code OPEN}이 여럿이 되어</b> 그 방식으로는
+     * 대상을 특정할 수 없다.
      *
-     * <p>둘 이상이면 어느 쪽을 되돌릴지 서버가 알 수 없으므로 사람에게 넘긴다.
+     * <p>대신 <b>종료된 회차를 거부한다.</b> 지난 회차 300개가 모두 {@code CLOSED}라 지정해도 막히므로, 파라미터를
+     * 받아도 같은 사고가 나지 않는다.
      */
-    private long resolveTarget() {
-        List<Long> openCoupons = repository.findOpenCouponIds();
-        if (openCoupons.size() != 1) {
+    private void rejectIfNotResettable(long couponId) {
+        String status = repository.findStatus(couponId);
+        if (status == null) {
             throw new BusinessException(
-                    ErrorCode.LOAD_TEST_TARGET_NOT_UNIQUE,
-                    "발급을 여는 쿠폰이 %d개다. 되돌릴 대상은 하나여야 한다".formatted(openCoupons.size()));
+                    ErrorCode.COUPON_NOT_FOUND, "쿠폰 %d를 찾을 수 없습니다".formatted(couponId));
         }
-        return openCoupons.get(0);
+        if (CLOSED_STATUS.equals(status)) {
+            throw new BusinessException(
+                    ErrorCode.LOAD_TEST_TARGET_CLOSED,
+                    "쿠폰 %d는 종료된 회차다. 되돌리면 복구할 방법이 재적재뿐이다".formatted(couponId));
+        }
     }
 
     /**
@@ -105,8 +115,9 @@ public class LoadTestResetService {
     /**
      * 발급에 쓰이는 키를 모두 지운다.
      *
-     * <p>재고만 되돌리면 {@code issued-members}에 남은 회원이 다음 부하 테스트에서 중복으로 걸러진다. 스트림을 지우면
-     * 컨슈머 그룹도 함께 사라져 다음 실행에서 새로 만들어진다.
+     * <p>재고만 되돌리면 {@code issued-members}에 남은 회원이 다음 부하 테스트에서 중복으로 걸러진다.
+     * 결과 카운터를 남겨두면 이전 회차의 예약 성공·품절 결과가 다음 회차에 누적된다.
+     * 스트림을 지우면 컨슈머 그룹도 함께 사라지므로 초기화 단계에서 다시 생성한다.
      */
     private void deleteRedisKeys(long couponId) {
         redisTemplate.delete(
@@ -114,7 +125,8 @@ public class LoadTestResetService {
                         CouponRedisKey.stock(couponId),
                         CouponRedisKey.metadata(couponId),
                         CouponRedisKey.issuedMembers(couponId),
-                        CouponRedisKey.issueStream(couponId)));
+                        CouponRedisKey.issueStream(couponId),
+                        CouponRedisKey.issueResultCounts(couponId)));
     }
 
     /**
