@@ -1,6 +1,10 @@
 package com.mocou.consistency;
 
 import com.mocou.global.response.ApiResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/admin/verifications")
+@Tag(name = "Admin - Verification", description = "정합성 검증 API")
 public class VerificationController {
 
     private final VerificationLauncher launcher;
@@ -39,8 +44,31 @@ public class VerificationController {
      * @param issueRunId 부하 테스트 직후 그 실행을 검증할 때 지정한다. 비우면 더미데이터를 포함한 DB 전체를 검증한다
      */
     @PostMapping
+    @Operation(
+            summary = "정합성 검증 실행",
+            description =
+                    "발급 이력 전체를 대상으로 규칙 8종을 검사한다. 300만 건 기준 약 90초가 걸려 "
+                            + "백그라운드에서 돌며, 202와 함께 돌아오는 runId로 결과를 따로 조회한다. "
+                            + "부하 테스트 직후라면 Redis Stream이 비워진 뒤에 실행해야 한다 — "
+                            + "동기화가 남아 있으면 Redis·DB 교차 규칙이 판정 불가가 되어 전체가 ERROR로 끝난다.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "202",
+                description = "검증을 시작했다. 끝난 것이 아니므로 runId로 결과를 조회해야 한다"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "409",
+                description =
+                        "이미 진행 중인 검증이 있다. 겹쳐 돌리면 결과 행이 둘로 갈린다. "
+                                + "시작한 지 5분이 지나도 끝나지 않은 실행은 죽은 것으로 보고 새 실행을 허용한다")
+    })
     public ResponseEntity<ApiResponse<VerificationStartResponse>> start(
-            @RequestParam(required = false) Long issueRunId) {
+            @Parameter(
+                            description =
+                                    "부하 테스트 직후 그 실행을 검증할 때 지정한다. "
+                                            + "비우면 더미데이터를 포함한 DB 전체를 검증한다",
+                            example = "5")
+                    @RequestParam(required = false)
+                    Long issueRunId) {
         long runId = launcher.launch(issueRunId);
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(VerificationStartResponse.started(runId)));
