@@ -35,3 +35,12 @@ mocou:
     # 300만 건 전량 검증이 약 90초다. 도중에 프로세스가 죽으면 시작 기록이 진행 중으로 남는데,
     # 이 시간이 지나야 다시 실행할 수 있으므로 실측의 3배 남짓으로 둔다.
     stale-run-minutes: 5
+  load-test:
+    ssm:
+      region: ${AWS_REGION:ap-northeast-2}
+      instance-id: ${MOCOU_INSTANCE_ID_K6:}
+      work-directory: ${MOCOU_K6_WORK_DIRECTORY:/home/ubuntu/mocou-backend}
+      # k6 EC2는 앱 EC2와 분리되어 있으므로 localhost 기본값을 두지 않는다.
+      target-url: ${MOCOU_K6_TARGET_URL:}
+      poll-interval-seconds: 2
+      timeout-seconds: 900

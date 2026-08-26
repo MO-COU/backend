@@ -8,6 +8,7 @@ MODE="${MODE:-smoke}"
 VERIFY_DB="${VERIFY_DB:-false}"
 VERIFY_REDIS="${VERIFY_REDIS:-false}"
 VERIFY_CONSISTENCY="${VERIFY_CONSISTENCY:-false}"
+ISSUE_RUN_ID="${ISSUE_RUN_ID:-}"
 DB_WAIT_TIMEOUT="${DB_WAIT_TIMEOUT:-120}"
 CONSISTENCY_WAIT_TIMEOUT="${CONSISTENCY_WAIT_TIMEOUT:-300}"
 EXPECTED_NEW_DB_COUNT="${EXPECTED_NEW_DB_COUNT:-}"
@@ -54,13 +55,43 @@ case "${MODE}" in
     REQUEST_COUNT="1"
     REQUEST_MEMBER_START="${MEMBER_ID:-999999}"
     ;;
-  rush)
+  rush|v1-ramp-20000)
     TEST_FILE="load-test/rush-issue.js"
     REQUEST_COUNT="${VUS:-20000}"
     REQUEST_MEMBER_START="${MEMBER_ID_START:-1}"
     ;;
+  spike-20000|v2-spike-20000)
+    TEST_FILE="load-test/spike-issue.js"
+    VUS="20000"
+    REQUEST_COUNT="${VUS}"
+    REQUEST_MEMBER_START="${MEMBER_ID_START:-1}"
+    ;;
+  spike-50000|v3-spike-50000)
+    TEST_FILE="load-test/spike-issue.js"
+    VUS="50000"
+    REQUEST_COUNT="${VUS}"
+    REQUEST_MEMBER_START="${MEMBER_ID_START:-1}"
+    ;;
+  v4-ramp-once-20000)
+    TEST_FILE="load-test/ramp-once-issue.js"
+    VUS="20000"
+    REQUEST_COUNT="${VUS}"
+    REQUEST_MEMBER_START="${MEMBER_ID_START:-1}"
+    ;;
+  v5-rate-4000-rps)
+    TEST_FILE="load-test/rate-issue.js"
+    VUS="20000"
+    REQUEST_COUNT="${VUS}"
+    REQUEST_MEMBER_START="${MEMBER_ID_START:-1}"
+    ;;
+  v6-repeat-1-to-3)
+    TEST_FILE="load-test/repeat-issue.js"
+    VUS="20000"
+    REQUEST_COUNT="${VUS}"
+    REQUEST_MEMBER_START="${MEMBER_ID_START:-1}"
+    ;;
   *)
-    echo "지원하지 않는 MODE입니다: ${MODE} (smoke, duplicate, rush 중 선택)" >&2
+    echo "지원하지 않는 MODE입니다: ${MODE}" >&2
     exit 1
     ;;
 esac
@@ -89,7 +120,12 @@ if [[ "${VERIFY_CONSISTENCY}" == "true" ]] && ! command -v jq >/dev/null 2>&1; t
   exit 1
 fi
 
-if [[ "${MODE}" == "rush" && "${VERIFY_REDIS}" == "true" ]]; then
+if [[ "${VERIFY_CONSISTENCY}" == "true" && ! "${ISSUE_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "특정 부하 테스트 실행을 검증하려면 ISSUE_RUN_ID가 필요합니다." >&2
+  exit 1
+fi
+
+if [[ ("${MODE}" == "rush" || "${MODE}" == v[1-6]-*) && "${VERIFY_REDIS}" == "true" ]]; then
   redis_stock_before="$(docker exec "${REDIS_CONTAINER}" \
     redis-cli GET "coupon:{${COUPON_ID}}:stock")"
 
@@ -157,9 +193,13 @@ if command -v k6 >/dev/null 2>&1; then
     -e COUPON_ID="${COUPON_ID}" \
     -e VUS="${VUS:-}" \
     -e RAMP_UP="${RAMP_UP:-}" \
+    -e HOLD="${HOLD:-}" \
     -e MEMBER_ID_START="${MEMBER_ID_START:-}" \
     -e MEMBER_ID="${MEMBER_ID:-}" \
     -e EXPECTED_STOCK="${EXPECTED_STOCK:-}" \
+    -e RATE="${RATE:-}" \
+    -e DURATION="${DURATION:-}" \
+    -e PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-}" \
     -e REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-}" \
     "${TEST_FILE}"
 elif command -v docker >/dev/null 2>&1; then
@@ -168,9 +208,13 @@ elif command -v docker >/dev/null 2>&1; then
     -e COUPON_ID="${COUPON_ID}" \
     -e VUS="${VUS:-}" \
     -e RAMP_UP="${RAMP_UP:-}" \
+    -e HOLD="${HOLD:-}" \
     -e MEMBER_ID_START="${MEMBER_ID_START:-}" \
     -e MEMBER_ID="${MEMBER_ID:-}" \
     -e EXPECTED_STOCK="${EXPECTED_STOCK:-}" \
+    -e RATE="${RATE:-}" \
+    -e DURATION="${DURATION:-}" \
+    -e PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-}" \
     -e REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-}" \
     -v "$(pwd)/${RESULT_DIR}:/results" \
     grafana/k6 run --summary-export "/results/${TEST_LABEL}-summary.json" \
@@ -287,7 +331,7 @@ fi
 
 echo "[5/5] 정합성 검증을 실행하고 결과를 기다립니다."
 start_response="$(curl --silent --show-error --fail-with-body \
-  --request POST "${TARGET}/api/admin/verifications")"
+  --request POST "${TARGET}/api/admin/verifications?issueRunId=${ISSUE_RUN_ID}")"
 verification_run_id="$(printf '%s' "${start_response}" | jq -er '.data.runId')"
 deadline=$((SECONDS + CONSISTENCY_WAIT_TIMEOUT))
 
