@@ -25,6 +25,11 @@ public class AdminCouponService {
     }
 
     @Transactional(readOnly = true)
+    public List<AdminCouponSummary> getCoupons() {
+        return repository.findAllSummaries();
+    }
+
+    @Transactional(readOnly = true)
     public AdminCouponIssueResultCounts getIssueResultCounts(long couponId) {
         validateCouponId(couponId);
         validateCouponExists(couponId);

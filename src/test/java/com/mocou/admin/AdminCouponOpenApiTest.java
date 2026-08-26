@@ -27,4 +27,19 @@ class AdminCouponOpenApiTest {
                 .map(io.swagger.v3.oas.annotations.responses.ApiResponse::responseCode))
                 .containsExactlyInAnyOrder("200", "400", "404", "503");
     }
+
+    @Test
+    @DisplayName("회차 목록 조회의 Swagger 성공 응답을 명세한다")
+    void documentsCouponListOperation() throws Exception {
+        Method method = AdminCouponController.class.getMethod("getCoupons");
+        Tag tag = method.getAnnotation(Tag.class);
+        Operation operation = method.getAnnotation(Operation.class);
+        ApiResponses responses = method.getAnnotation(ApiResponses.class);
+
+        assertThat(tag.name()).isEqualTo("Admin Coupon");
+        assertThat(operation.summary()).isEqualTo("회차 목록 조회");
+        assertThat(Arrays.stream(responses.value())
+                .map(io.swagger.v3.oas.annotations.responses.ApiResponse::responseCode))
+                .containsExactly("200");
+    }
 }

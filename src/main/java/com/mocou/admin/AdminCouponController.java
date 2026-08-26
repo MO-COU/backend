@@ -4,6 +4,7 @@ import com.mocou.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +20,20 @@ public class AdminCouponController {
 
     public AdminCouponController(AdminCouponService service) {
         this.service = service;
+    }
+
+    @GetMapping
+    @Tag(name = "Admin Coupon", description = "관리자 쿠폰(회차) 조회 API")
+    @Operation(
+            summary = "회차 목록 조회",
+            description =
+                    "만들어진 회차를 최근 순으로 조회합니다. ")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200", description = "회차 목록 조회 성공")
+    })
+    public ResponseEntity<ApiResponse<List<AdminCouponSummary>>> getCoupons() {
+        return ResponseEntity.ok(ApiResponse.success(service.getCoupons()));
     }
 
     @GetMapping("/{couponId}/stock")

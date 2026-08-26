@@ -195,4 +195,38 @@ class AdminCouponServiceTest {
         verify(repository, never()).existsCoupon(COUPON_ID);
     }
 
+    @Test
+    @DisplayName("회차 목록을 저장소가 준 순서 그대로 돌려준다")
+    void returnsCouponSummaries() {
+        // given - 최근 회차가 먼저 오도록 정렬하는 책임은 저장소에 있다
+        AdminCouponSummary latest =
+                new AdminCouponSummary(
+                        302L,
+                        "아메리카노 무료 쿠폰 302회차",
+                        LocalDateTime.of(2026, 8, 26, 10, 0),
+                        LocalDateTime.of(2026, 8, 26, 23, 59, 59),
+                        10_000,
+                        "OPEN");
+        AdminCouponSummary previous =
+                new AdminCouponSummary(
+                        301L,
+                        "아메리카노 무료 쿠폰 301회차",
+                        LocalDateTime.of(2026, 8, 25, 10, 0),
+                        LocalDateTime.of(2026, 8, 25, 23, 59, 59),
+                        10_000,
+                        "CLOSED");
+        given(repository.findAllSummaries()).willReturn(List.of(latest, previous));
+
+        // when & then
+        assertThat(service.getCoupons()).containsExactly(latest, previous);
+    }
+
+    @Test
+    @DisplayName("회차가 하나도 없으면 빈 목록을 돌려준다")
+    void returnsEmptyListWhenNoCouponExists() {
+        given(repository.findAllSummaries()).willReturn(List.of());
+
+        assertThat(service.getCoupons()).isEmpty();
+    }
+
 }
