@@ -47,6 +47,14 @@ public enum ErrorCode {
     // 종료된 회차에는 검증 대상인 더미데이터가 들어 있다. 되돌리면 복구할 방법이 재적재뿐이다.
     LOAD_TEST_TARGET_CLOSED(HttpStatus.CONFLICT, "종료된 회차는 되돌릴 수 없습니다"),
 
+    // 알림 (outbox)
+    // notification insert(큐잉) 자체가 실패한 경우 - uk_notification_target 중복은
+    // 정상 스킵이라 여기 안 해당하고, 그 외 DB 오류(커넥션 끊김 등)만 해당한다.
+    NOTIFICATION_QUEUE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "알림 큐잉에 실패했습니다"),
+    // 큐잉된 알림을 폴링/발송/상태갱신하는 과정(findPending, markSentBatch,
+    // incrementRetryCount, markFailed)에서 DB 오류가 난 경우.
+    NOTIFICATION_DISPATCH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "알림 발송 처리에 실패했습니다"),
+
     // 서버
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스를 일시적으로 사용할 수 없습니다"),
     SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다"),

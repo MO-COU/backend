@@ -201,7 +201,9 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
                         + "SET MESSAGE_TEXT = 'forced notification failure'");
 
         assertThatThrownBy(() -> service.use(ISSUE_ID, "notification-failure"))
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.NOTIFICATION_QUEUE_FAILED));
 
         assertThat(statusOf(ISSUE_ID)).isEqualTo("ISSUED");
         assertThat(usedHistoryCount(ISSUE_ID)).isZero();

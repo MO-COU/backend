@@ -2,15 +2,20 @@ package com.mocou.notification;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
 import com.mocou.support.MySqlContainerTest;
 
 @SpringBootTest(properties = "spring.batch.jdbc.initialize-schema=never")
@@ -21,6 +26,13 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
     private static final long MEMBER_ID_2 = 1002L;
 
     @Autowired private NotificationRepository repository;
+
+    // 이 클래스가 만드는 트리거가 다른 테스트(같은 컨테이너를 공유)로 새지 않게 앞뒤로 정리한다.
+    @BeforeEach
+    @AfterEach
+    void removeForcedFailureTrigger() {
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS fail_notification_insert");
+    }
 
     @Test
     @DisplayName("같은 (coupon, member, type) 알림을 두 번 저장해도 한 건만 남는다")
@@ -114,6 +126,26 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
 
         // then
         assertThat(statusOf(id)).isEqualTo("PENDING");
+    }
+
+    // outbox: uk_notification_target 중복(DuplicateKeyException)은 조용히 null을 반환해야
+    // 하지만, 그 외의 진짜 DB 오류는 원인 불명의 RuntimeException이 아니라
+    // BusinessException(NOTIFICATION_QUEUE_FAILED)으로 명확히 구분돼야 한다.
+    @Test
+    @DisplayName("중복이 아닌 DB 오류로 큐잉이 실패하면 NOTIFICATION_QUEUE_FAILED로 표시된다")
+    void wrapsNonDuplicateInsertFailureAsBusinessException() {
+        // given
+        insertCouponAndMember();
+        jdbcTemplate.execute(
+                "CREATE TRIGGER fail_notification_insert BEFORE INSERT ON notification "
+                        + "FOR EACH ROW SIGNAL SQLSTATE '45000' "
+                        + "SET MESSAGE_TEXT = 'forced notification insert failure'");
+
+        // when, then
+        assertThatThrownBy(() -> repository.save(record(NotificationType.ISSUE_SUCCESS)))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.NOTIFICATION_QUEUE_FAILED));
     }
 
     private String statusOf(long notificationId) {
