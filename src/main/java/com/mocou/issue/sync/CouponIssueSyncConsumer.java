@@ -242,7 +242,7 @@ public class CouponIssueSyncConsumer {
      * maxDeliveryCount를 넘겨 더 이상 재시도하지 않기로 포기한 엔트리를 처리한다
      * (Issue #39 체크리스트 10번). 일반 배치(saveBatch)로는 절대 보내지 않고, 대신
      * Redis 재고를 원복(compensate)한 뒤 issue_failure_log에 남기고 XACK+XDEL로
-     * 스트림에서 제거한다. compensate는 멱등(compensate-coupon.lua의 SREM 가드)이라
+     * 스트림에서 제거한다. compensate는 멱등(compensate-coupon.lua의 ZSCORE 가드)이라
      * 이 메서드 도중 예외가 나 다음 tick에 그대로 재시도돼도 재고를 이중으로
      * 원복하지 않는다.
      */

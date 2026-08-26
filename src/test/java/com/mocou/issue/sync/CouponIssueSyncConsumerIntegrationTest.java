@@ -192,7 +192,7 @@ class CouponIssueSyncConsumerIntegrationTest
         // reserveAndAppendEvent가 실제로 남기는 상태(재고 차감 + 발급 회원 등록)를
         // 직접 재현해서, compensate가 이걸 원복하는지 끝까지 검증할 수 있게 한다.
         setStock(5);
-        redisTemplate.opsForSet().add(issuedMembersKey(), "100");
+        redisTemplate.opsForZSet().add(issuedMembersKey(), "100", 1);
         addEvent("event-1", 100L, 1L);
         RecordId recordId = redisTemplate.<String, String>opsForStream().read(
                         Consumer.from(RedisCouponIssueSyncGateway.GROUP_NAME, "crashed-worker"),
@@ -218,7 +218,7 @@ class CouponIssueSyncConsumerIntegrationTest
         verify(repository).recordFailure(eq(COUPON_ID), eq(100L), eq(ErrorCode.INTERNAL_ERROR), any());
         verify(notificationSender, never()).notifyMember(any(), anyLong(), anyLong());
         assertThat(currentStock()).isEqualTo("6");
-        assertThat(redisTemplate.opsForSet().isMember(issuedMembersKey(), "100")).isFalse();
+        assertThat(redisTemplate.opsForZSet().score(issuedMembersKey(), "100")).isNull();
         assertThat(pendingCount()).isZero();
         assertThat(redisTemplate.opsForStream().size(issueStreamKey())).isZero();
     }

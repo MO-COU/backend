@@ -138,7 +138,10 @@ class RedisDbMismatchRule implements ConsistencyRule {
     }
 
     private Set<Long> redisIssuedMembers(long couponId) {
-        Set<String> raw = redisTemplate.opsForSet().members(CouponRedisKey.issuedMembers(couponId));
+        Set<String> raw =
+                redisTemplate
+                        .opsForZSet()
+                        .range(CouponRedisKey.issuedMembers(couponId), 0, -1);
         Set<Long> members = new HashSet<>();
         if (raw != null) {
             raw.forEach(value -> members.add(Long.parseLong(value)));
