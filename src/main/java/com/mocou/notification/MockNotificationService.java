@@ -1,46 +1,33 @@
 package com.mocou.notification;
 
-import java.time.LocalDateTime;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * 실제 외부 알림 API를 호출하지 않고, 로그 + notification 테이블 기록으로 대체함.
- * 항상 즉시 SENT로 처리한다 - Mock이므로 실패 시나리오는 없음.
+ * outbox: 실제 알림 서버를 직접 호출하지 않고, notification 테이블에 PENDING으로
+ * 기록만 하고 즉시 반환한다. 호출부(A/B팀의 @Transactional 메서드) 안에서 호출되면
+ * 이 insert가 그 트랜잭션에 그대로 합류하므로, 비즈니스 write와 알림 큐잉이 원자적으로
+ * 묶인다(outbox 패턴).
+ *
+ * <p>실제 발송과 상태 갱신(SENT/FAILED)은 {@link NotificationDispatchConsumer}가 전담한다.
  */
 @Service
 public class MockNotificationService implements NotificationSender {
 
-    private static final Logger log = LoggerFactory.getLogger(MockNotificationService.class);
-
     private final NotificationRepository notificationRepository;
 
-    // Mock 처리
     public MockNotificationService(NotificationRepository notificationRepository) {
         this.notificationRepository = notificationRepository;
     }
 
     @Override
     public void notifyMember(NotificationType type, long couponId, long memberId) {
-        send(type, couponId, memberId);
+        notificationRepository.save(
+                new NotificationRecord(couponId, memberId, type, NotificationStatus.PENDING, null));
     }
 
     @Override
     public void notifyAdmin(NotificationType type, Long couponId) {
-        send(type, couponId, null);
-    }
-
-    // 발송 없이 로그 남기기
-    private void send(NotificationType type, Long couponId, Long memberId) {
-        LocalDateTime sentAt = LocalDateTime.now();
-        log.info(
-                "[MockNotification] type={}, couponId={}, memberId={}, sentAt={}",
-                type,
-                couponId,
-                memberId,
-                sentAt);
         notificationRepository.save(
-                new NotificationRecord(couponId, memberId, type, NotificationStatus.SENT, sentAt));
+                new NotificationRecord(couponId, null, type, NotificationStatus.PENDING, null));
     }
 }

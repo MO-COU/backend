@@ -12,6 +12,8 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.mocou.global.exception.ErrorCode;
+import com.mocou.notification.NotificationSender;
+import com.mocou.notification.NotificationType;
 
 import lombok.RequiredArgsConstructor;
 
@@ -56,6 +58,8 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
     private static final String IDEMPOTENCY_KEY_PREFIX = "ISSUE:";
 
     private final JdbcClient jdbcClient;
+    // outbox: 저장/실패 기록과 같은 트랜잭션 안에서 알림을 PENDING으로 큐잉하기 위해 주입.
+    private final NotificationSender notificationSender;
 
     @Override
     public List<Long> findOpenCouponIds() {
@@ -88,10 +92,18 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
                     .update();
         }
 
+        // outbox: 이 트랜잭션 안에서 큐잉해야 "커밋은 됐는데 알림 큐잉이 안 된" 크래시 갭이 없다.
+        for (CouponIssueSyncEvent event : savedEvents) {
+            notificationSender.notifyMember(NotificationType.ISSUE_SUCCESS, couponId, event.memberId());
+        }
+
         return savedEvents;
     }
 
+    // outbox: issue_failure_log와 알림 큐잉을 원자적으로 묶으려고 트랜잭션을 새로 건다
+    // (이전엔 이 메서드가 트랜잭션 없이 단독 insert였다).
     @Override
+    @Transactional
     public void recordFailure(long couponId, long memberId, ErrorCode failureReason, LocalDateTime occurredAt) {
         jdbcClient.sql(INSERT_ISSUE_FAILURE_LOG)
                 .param("couponId", couponId)
@@ -99,6 +111,7 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
                 .param("failureReason", failureReason.name())
                 .param("occurredAt", occurredAt)
                 .update();
+        notificationSender.notifyMember(NotificationType.ISSUE_FAILED, couponId, memberId);
     }
 
     /** @return 새로 저장했으면 true, 재전달된 중복이라 skip했으면 false */
