@@ -30,7 +30,8 @@ Logback은 현재 로그 파일이 없으면 생성하고, 있으면 이어서 �
 - Redis 연결 실패 등 일시적 서비스 장애(`SERVICE_UNAVAILABLE`)
 - Redis Stream에서 DB로 발급을 동기화하다 재시도 한도를 초과한 사건
 - 정합성 검증 전체 실행 또는 개별 규칙의 실패
-- 쿠폰 사용 후 알림 처리 실패
+- 알림 큐잉 DB 저장 실패(`NOTIFICATION_QUEUE_FAILED`)
+- 알림 발송 상태 조회·갱신 DB 실패(`NOTIFICATION_DISPATCH_FAILED`)
 - 배치·스케줄러 및 프레임워크 처리 실패
 
 재고 소진, 중복 발급, 발급 기간 전·후, 발급 준비 전·종료 후 같은 정상적인 발급 거절은 시스템 오류가 아니다. `SOLD_OUT`, `DUPLICATE_ISSUE`, `NOT_OPEN_YET`, `ISSUE_CLOSED`, `STOCK_NOT_INITIALIZED`, `METADATA_NOT_INITIALIZED` 결과는 Redis 발급 결과 카운터에서 집계하며, 이 사유만으로 오류 파일에 기록하지 않는다.
@@ -39,7 +40,13 @@ Logback은 현재 로그 파일이 없으면 생성하고, 있으면 이어서 �
 
 `issue_failure_log`는 Redis Stream → DB 동기화가 재시도 한도를 초과해 재고 보상까지 수행한 발급 건을 배치 담당자가 확인하는 데이터다. 이 테이블의 스키마와 저장 경로는 변경하지 않는다.
 
-동일한 재시도 소진 사건은 시스템 오류 파일에도 남긴다. 파일 로그에는 `eventId`, Stream ID, `couponId`, `memberId`, 재시도 한도, 재고 보상 결과를 기록해 운영자가 원인을 분석할 수 있게 한다.
+동일한 재시도 소진 사건은 시스템 오류 파일에도 남긴다. 파일 로그에는 `eventId`, Stream ID, `couponId`, `memberId`, 재시도 한도, 재고 보상 결과를 기록해 운영자가 원인을 분석할 수 있게 한다. 이때 `issue_failure_log` 기록과 `ISSUE_FAILED` 알림의 outbox 큐잉은 같은 트랜잭션으로 처리된다.
+
+## 알림 outbox 실패 처리
+
+쿠폰 사용과 발급 결과 알림은 비즈니스 트랜잭션 안에서 `notification` 테이블에 `PENDING`으로 큐잉한다. 큐잉 DB 저장 실패는 트랜잭션을 롤백하고 `NOTIFICATION_QUEUE_FAILED`로 처리되며, 오류 파일에도 기록된다.
+
+큐잉된 알림의 실제 발송은 커밋 후 즉시 시도하고, 누락된 `PENDING` 건은 폴링으로 다시 처리한다. 발송 자체가 실패하면 `WARN` 로그를 남기고 재시도 횟수를 올리며, 재시도 한도를 넘으면 `notification.status`를 `FAILED`로 확정한다. 이 발송 실패는 `SYSTEM_ERROR_FILE`의 기록 대상이 아니다. 반면 `PENDING` 조회나 발송 상태 갱신 같은 DB 작업이 실패하면 `NOTIFICATION_DISPATCH_FAILED`로 처리되어 오류 파일에 기록된다.
 
 ## 확인 방법
 
