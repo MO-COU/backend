@@ -20,7 +20,9 @@
         </rollingPolicy>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <includeMdc>true</includeMdc>
-            <includeStackTrace>false</includeStackTrace>
+            <fieldNames>
+                <stackTrace>[ignore]</stackTrace>
+            </fieldNames>
         </encoder>
     </appender>
 
