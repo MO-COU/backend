@@ -1,7 +1,7 @@
 package com.mocou.notification;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -50,9 +50,29 @@ class NotificationDispatchConsumerIntegrationTest {
         consumer.dispatch();
 
         // then
-        verify(notificationRepository).markSent(eq(1L), any(LocalDateTime.class));
+        verify(notificationRepository).markSentBatch(eq(List.of(1L)), any(LocalDateTime.class));
         verify(notificationRepository, never()).incrementRetryCount(1L);
         verify(notificationRepository, never()).markFailed(1L);
+    }
+
+    // outbox: 이번 배치 처리 리팩터링의 핵심 - 여러 건이 동시에 성공하면 markSentBatch가
+    // 건별로 여러 번이 아니라 한 번만, 전체 id를 묶어서 호출돼야 한다.
+    @Test
+    @DisplayName("여러 건이 한 번에 성공하면 markSentBatch를 한 번만 묶어서 호출한다")
+    void marksMultipleSuccessesInOneBatchCall() {
+        // given
+        given(notificationRepository.findPending(anyBatchSize()))
+                .willReturn(List.of(pending(1L, 0), pending(2L, 0)));
+        NotificationDispatchConsumer consumer = consumer(properties(5));
+
+        // when
+        consumer.dispatch();
+
+        // then
+        verify(notificationRepository, org.mockito.Mockito.times(1))
+                .markSentBatch(
+                        argThat((List<Long> ids) -> ids.containsAll(List.of(1L, 2L)) && ids.size() == 2),
+                        any(LocalDateTime.class));
     }
 
     @Test
@@ -66,7 +86,7 @@ class NotificationDispatchConsumerIntegrationTest {
         consumer.dispatch();
 
         // then
-        verify(notificationRepository, never()).markSent(anyLong(), any());
+        verify(notificationRepository).markSentBatch(eq(List.of()), any(LocalDateTime.class));
     }
 
     @Test
@@ -83,7 +103,7 @@ class NotificationDispatchConsumerIntegrationTest {
 
         // then
         verify(notificationRepository).incrementRetryCount(1L);
-        verify(notificationRepository, never()).markSent(anyLong(), any());
+        verify(notificationRepository).markSentBatch(eq(List.of()), any(LocalDateTime.class));
         verify(notificationRepository, never()).markFailed(1L);
     }
 

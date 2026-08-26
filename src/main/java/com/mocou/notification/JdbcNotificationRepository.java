@@ -1,20 +1,28 @@
 package com.mocou.notification;
 
+import java.sql.PreparedStatement;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class JdbcNotificationRepository implements NotificationRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 
     public JdbcNotificationRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+        this.namedParameterJdbcTemplate = new NamedParameterJdbcTemplate(jdbcTemplate.getDataSource());
     }
 
     /*
@@ -25,18 +33,31 @@ public class JdbcNotificationRepository implements NotificationRepository {
      * 안 걸려 정상적으로 여러 번 쌓인다.
      */
     @Override
-    public void save(NotificationRecord notification) {
+    public Long save(NotificationRecord notification) {
         try {
+            KeyHolder keyHolder = new GeneratedKeyHolder();
             jdbcTemplate.update(
-                    "INSERT INTO notification (coupon_id, member_id, type, status, sent_at, created_at) "
-                            + "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
-                    notification.couponId(),
-                    notification.memberId(),
-                    notification.type().name(),
-                    notification.status().name(),
-                    notification.sentAt() == null ? null : Timestamp.valueOf(notification.sentAt()));
+                    connection -> {
+                        PreparedStatement ps = connection.prepareStatement(
+                                "INSERT INTO notification (coupon_id, member_id, type, status, sent_at, created_at) "
+                                        + "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                                PreparedStatement.RETURN_GENERATED_KEYS);
+                        ps.setObject(1, notification.couponId());
+                        ps.setObject(2, notification.memberId());
+                        ps.setString(3, notification.type().name());
+                        ps.setString(4, notification.status().name());
+                        if (notification.sentAt() == null) {
+                            ps.setNull(5, Types.TIMESTAMP);
+                        } else {
+                            ps.setTimestamp(5, Timestamp.valueOf(notification.sentAt()));
+                        }
+                        return ps;
+                    },
+                    keyHolder);
+            return keyHolder.getKey().longValue();
         } catch (DuplicateKeyException e) {
-            // no-op: 이미 큐잉된 알림과 동일한 대상이므로 추가로 할 일이 없다.
+            // 이미 큐잉된 알림과 동일한 대상이므로 추가로 할 일이 없다.
+            return null;
         }
     }
 
@@ -57,11 +78,15 @@ public class JdbcNotificationRepository implements NotificationRepository {
     }
 
     @Override
-    public void markSent(long notificationId, LocalDateTime sentAt) {
-        jdbcTemplate.update(
-                "UPDATE notification SET status = 'SENT', sent_at = ? WHERE notification_id = ?",
-                Timestamp.valueOf(sentAt),
-                notificationId);
+    public void markSentBatch(List<Long> notificationIds, LocalDateTime sentAt) {
+        if (notificationIds.isEmpty()) {
+            return;
+        }
+        namedParameterJdbcTemplate.update(
+                "UPDATE notification SET status = 'SENT', sent_at = :sentAt WHERE notification_id IN (:ids)",
+                new MapSqlParameterSource()
+                        .addValue("sentAt", Timestamp.valueOf(sentAt))
+                        .addValue("ids", notificationIds));
     }
 
     @Override

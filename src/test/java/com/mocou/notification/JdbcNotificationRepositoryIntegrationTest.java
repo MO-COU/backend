@@ -3,6 +3,9 @@ package com.mocou.notification;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +18,7 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
 
     private static final long COUPON_ID = 2001L;
     private static final long MEMBER_ID = 1001L;
+    private static final long MEMBER_ID_2 = 1002L;
 
     @Autowired private NotificationRepository repository;
 
@@ -76,6 +80,51 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
                 .isEqualTo(2);
     }
 
+    // outbox: 성공(pending->sent)만 묶어서 갱신하는 게 이번 배치 리팩터링의 핵심이라,
+    // 여러 건을 한 번에 SENT로 확정해도 각 건이 정확히 반영되는지 실제 DB로 검증한다.
+    @Test
+    @DisplayName("여러 알림을 한 번에 SENT로 확정하면 모두 반영되고 나머지는 PENDING으로 남는다")
+    void marksMultipleNotificationsSentInOneBatch() {
+        // given
+        insertCouponAndMember(MEMBER_ID);
+        insertCouponAndMember(MEMBER_ID_2);
+        Long id1 = repository.save(record(MEMBER_ID, NotificationType.ISSUE_SUCCESS));
+        Long id2 = repository.save(record(MEMBER_ID_2, NotificationType.ISSUE_SUCCESS));
+        Long untouchedId = repository.save(record(MEMBER_ID, NotificationType.USED));
+
+        // when
+        repository.markSentBatch(List.of(id1, id2), LocalDateTime.now());
+
+        // then
+        assertThat(statusOf(id1)).isEqualTo("SENT");
+        assertThat(statusOf(id2)).isEqualTo("SENT");
+        assertThat(statusOf(untouchedId)).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("빈 목록으로 SENT 확정을 호출해도 아무 것도 바뀌지 않는다")
+    void markSentBatchWithEmptyListDoesNothing() {
+        // given
+        insertCouponAndMember(MEMBER_ID);
+        Long id = repository.save(record(MEMBER_ID, NotificationType.ISSUE_SUCCESS));
+
+        // when
+        assertThatCode(() -> repository.markSentBatch(List.of(), LocalDateTime.now()))
+                .doesNotThrowAnyException();
+
+        // then
+        assertThat(statusOf(id)).isEqualTo("PENDING");
+    }
+
+    private String statusOf(long notificationId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM notification WHERE notification_id = ?", String.class, notificationId);
+    }
+
+    private NotificationRecord record(long memberId, NotificationType type) {
+        return new NotificationRecord(COUPON_ID, memberId, type, NotificationStatus.PENDING, null);
+    }
+
     private NotificationRecord record(NotificationType type) {
         return new NotificationRecord(COUPON_ID, MEMBER_ID, type, NotificationStatus.PENDING, null);
     }
@@ -90,15 +139,20 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
     }
 
     private void insertCouponAndMember() {
+        insertCouponAndMember(MEMBER_ID);
+    }
+
+    // coupon_id는 여러 회원이 공유하므로 INSERT IGNORE로 두 번째 호출부터는 조용히 건너뛴다.
+    private void insertCouponAndMember(long memberId) {
         jdbcTemplate.update(
                 "INSERT INTO member (member_id, email, name, phone) VALUES (?, ?, ?, ?)",
-                MEMBER_ID,
-                "member" + MEMBER_ID + "@example.com",
+                memberId,
+                "member" + memberId + "@example.com",
                 "유니크 제약 테스트 회원",
                 "01000000000");
         jdbcTemplate.update(
                 """
-                INSERT INTO coupon (coupon_id, name, open_at, close_at, status)
+                INSERT IGNORE INTO coupon (coupon_id, name, open_at, close_at, status)
                 VALUES (?, ?, CURRENT_TIMESTAMP - INTERVAL 1 DAY, CURRENT_TIMESTAMP + INTERVAL 1 DAY, 'OPEN')
                 """,
                 COUPON_ID,

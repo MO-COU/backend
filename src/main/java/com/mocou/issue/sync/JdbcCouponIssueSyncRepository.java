@@ -93,8 +93,14 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
         }
 
         // outbox: 이 트랜잭션 안에서 큐잉해야 "커밋은 됐는데 알림 큐잉이 안 된" 크래시 갭이 없다.
-        for (CouponIssueSyncEvent event : savedEvents) {
-            notificationSender.notifyMember(NotificationType.ISSUE_SUCCESS, couponId, event.memberId());
+        // 한 번에 여러 건이 자연스럽게 발생하는 곳이라 벌크 메서드를 쓴다 — 큐잉 자체는
+        // 건별 insert지만(유니크 제약 skip이 건별로 걸림), 발송 성공 후 SENT 갱신은
+        // 이 배치 전체가 한 번에 묶여 나간다.
+        if (!savedEvents.isEmpty()) {
+            notificationSender.notifyMembers(
+                    NotificationType.ISSUE_SUCCESS,
+                    couponId,
+                    savedEvents.stream().map(CouponIssueSyncEvent::memberId).toList());
         }
 
         return savedEvents;
