@@ -1,6 +1,7 @@
 package com.mocou.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.BDDMockito.given;
 
 import com.mocou.support.MySqlContainerTest;
 import java.time.LocalDateTime;
@@ -17,6 +18,25 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
 
     @Autowired private AdminCouponService service;
     @MockitoBean private AdminCouponRealtimeStockRepository realtimeStockRepository;
+    @MockitoBean private RedisAdminCouponIssueResultRepository issueResultRepository;
+
+    @Test
+    @DisplayName("MySQL 발급 이력 수를 Redis 발급 결과의 DB 적재 진행에 반영한다")
+    void includesPersistedIssueCountInIssueResultCounts() {
+        // given
+        insertCouponAndMembers();
+        insertIssue(3001L, 1001L, "2026-08-19 10:00:00");
+        insertIssue(3002L, 1002L, "2026-08-19 10:01:00");
+        given(issueResultRepository.findCounts(COUPON_ID))
+                .willReturn(AdminCouponIssueResultCounts.of(COUPON_ID, 5, 0, 0, 0, 0, 0, 0, 1));
+
+        // when
+        AdminCouponIssueResultCounts result = service.getIssueResultCounts(COUPON_ID);
+
+        // then
+        assertThat(result.dbPersisted()).isEqualTo(2);
+        assertThat(result.pendingOrRetrying()).isEqualTo(2);
+    }
 
     @Test
     @DisplayName("MySQL에 적재된 쿠폰 발급 이력을 최신순으로 조회한다")

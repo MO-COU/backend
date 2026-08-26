@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class AdminCouponOpenApiTest {
 
     @Test
-    @DisplayName("Redis 발급 결과 집계 조회의 Swagger 성공 및 오류 응답을 명세한다")
+    @DisplayName("발급 결과와 DB 적재 진행 조회의 Swagger 성공 및 오류 응답을 명세한다")
     void documentsIssueResultCountsOperation() throws Exception {
         Method method = AdminCouponController.class.getMethod("getIssueResultCounts", long.class);
         Tag tag = method.getAnnotation(Tag.class);
@@ -21,8 +21,11 @@ class AdminCouponOpenApiTest {
         ApiResponses responses = method.getAnnotation(ApiResponses.class);
 
         assertThat(AdminCouponController.class.getAnnotation(Tag.class)).isNull();
-        assertThat(tag.name()).isEqualTo("Issue Dashboard");
-        assertThat(operation.summary()).isEqualTo("Redis 발급 결과 누적 집계 조회");
+        assertThat(tag.name()).isEqualTo("Issue Results");
+        assertThat(tag.description()).isEqualTo("Redis 발급 결과와 DB 적재 진행 조회 API");
+        assertThat(operation.summary()).isEqualTo("발급 결과와 DB 적재 진행 조회");
+        assertThat(operation.description())
+                .isEqualTo("Redis 발급 결과 누적값과 DB 적재 진행을 함께 조회합니다.");
         assertThat(Arrays.stream(responses.value())
                 .map(io.swagger.v3.oas.annotations.responses.ApiResponse::responseCode))
                 .containsExactlyInAnyOrder("200", "400", "404", "503");
