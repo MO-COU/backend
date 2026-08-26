@@ -21,8 +21,6 @@ import org.springframework.data.redis.connection.stream.StreamReadOptions;
 
 import com.mocou.coupon.CouponStatusChangedEvent;
 import com.mocou.global.exception.ErrorCode;
-import com.mocou.notification.NotificationSender;
-import com.mocou.notification.NotificationType;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -38,7 +36,7 @@ import static org.mockito.Mockito.verify;
 /**
  * DB 저장({@link CouponIssueSyncRepository})은 mock으로 대체해서, Redis
  * 버퍼링/카운트·시간 기반 flush 트리거만 빠르게 검증한다. 실제 DB 반영/중복
- * skip은 {@link JdbcCouponIssueSyncRepositoryIntegrationTest}가 담당한다.
+ * skip과 outbox 알림 큐잉은 {@link JdbcCouponIssueSyncRepositoryIntegrationTest}가 담당한다.
  */
 @ExtendWith(MockitoExtension.class)
 class CouponIssueSyncConsumerIntegrationTest
@@ -47,17 +45,13 @@ class CouponIssueSyncConsumerIntegrationTest
     @Mock
     private CouponIssueSyncRepository repository;
 
-    @Mock
-    private NotificationSender notificationSender;
-
     @Test
     @DisplayName("청크 크기만큼 쌓이면 시간 창을 기다리지 않고 즉시 flush한다")
     void flushesImmediatelyWhenChunkSizeReached() {
         // given
         CouponIssueSyncProperties properties = properties(3, 5_000);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(
-                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
         consumer.initOpenCouponIds();
 
@@ -80,38 +74,12 @@ class CouponIssueSyncConsumerIntegrationTest
     }
 
     @Test
-    @DisplayName("DB 저장에 성공한 이벤트는 회원에게 발급 성공 알림을 보낸다")
-    void notifiesMembersForSuccessfullySavedEvents() {
-        // given
-        CouponIssueSyncProperties properties = properties(2, 5_000);
-        CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
-                redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
-        given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.initOpenCouponIds();
-        // saveBatch에 넘어온 이벤트가 전부 새로 저장됐다고 가정 — 재전달 skip 케이스는
-        // JdbcCouponIssueSyncRepositoryIntegrationTest가 별도로 검증한다.
-        given(repository.saveBatch(anyLong(), anyList()))
-                .willAnswer(invocation -> invocation.getArgument(1));
-
-        addEvent("event-1", 100L, 1L);
-        addEvent("event-2", 101L, 2L);
-
-        // when
-        consumer.consume();
-
-        // then
-        verify(notificationSender).notifyMember(NotificationType.ISSUE_SUCCESS, COUPON_ID, 100L);
-        verify(notificationSender).notifyMember(NotificationType.ISSUE_SUCCESS, COUPON_ID, 101L);
-    }
-
-    @Test
     @DisplayName("청크 크기가 안 차도 배치 시간 창이 지나면 flush한다")
     void flushesWhenBatchWindowElapsesBeforeChunkSizeReached() throws InterruptedException {
         // given
         CouponIssueSyncProperties properties = properties(100, 300);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(
-                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
         consumer.initOpenCouponIds();
 
@@ -145,8 +113,7 @@ class CouponIssueSyncConsumerIntegrationTest
         properties.setPendingMinIdleMs(100);
         properties.setPendingCheckIntervalMs(0);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(
-                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
         consumer.initOpenCouponIds();
 
@@ -183,8 +150,7 @@ class CouponIssueSyncConsumerIntegrationTest
         properties.setPendingCheckIntervalMs(0);
         properties.setMaxDeliveryCount(3);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(
-                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
         consumer.initOpenCouponIds();
 
@@ -215,8 +181,9 @@ class CouponIssueSyncConsumerIntegrationTest
 
         // then
         verify(repository, never()).saveBatch(anyLong(), anyList());
+        // outbox: 실패 로그와 알림 큐잉은 repository.recordFailure 내부(같은 트랜잭션)에서
+        // 처리된다 — JdbcCouponIssueSyncRepositoryIntegrationTest가 그 부분을 검증한다.
         verify(repository).recordFailure(eq(COUPON_ID), eq(100L), eq(ErrorCode.INTERNAL_ERROR), any());
-        verify(notificationSender, never()).notifyMember(any(), anyLong(), anyLong());
         assertThat(currentStock()).isEqualTo("6");
         assertThat(redisTemplate.opsForSet().isMember(issuedMembersKey(), "100")).isFalse();
         assertThat(pendingCount()).isZero();
@@ -229,8 +196,7 @@ class CouponIssueSyncConsumerIntegrationTest
         // given
         CouponIssueSyncProperties properties = properties(1, 5_000);
         CouponIssueSyncConsumer consumer =
-                new CouponIssueSyncConsumer(
-                        redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
         consumer.initOpenCouponIds();
 
@@ -253,7 +219,7 @@ class CouponIssueSyncConsumerIntegrationTest
         // given
         CouponIssueSyncProperties properties = properties(1, 5_000);
         CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
-                redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+                redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
         consumer.initOpenCouponIds();
         given(repository.saveBatch(anyLong(), anyList()))
@@ -295,8 +261,8 @@ class CouponIssueSyncConsumerIntegrationTest
     void queriesOpenCouponIdsOnlyOnceAcrossMultipleConsumeCalls() {
         // given
         CouponIssueSyncProperties properties = properties(100, 5_000);
-        CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
-                redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+        CouponIssueSyncConsumer consumer =
+                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
         consumer.initOpenCouponIds();
 
@@ -316,8 +282,8 @@ class CouponIssueSyncConsumerIntegrationTest
     void refreshesOpenCouponIdsOnStatusChangedEvent() {
         // given
         CouponIssueSyncProperties properties = properties(1, 5_000);
-        CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
-                redisTemplate, gateway, issueGateway, repository, notificationSender, properties);
+        CouponIssueSyncConsumer consumer =
+                new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of());
         consumer.initOpenCouponIds();
         given(repository.saveBatch(anyLong(), anyList()))

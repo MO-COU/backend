@@ -80,7 +80,7 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
                         syncEvent(MEMBER_ID_2, "event-2")));
 
         // then
-        // 반환값은 알림 발송 대상을 결정하는 데 쓰이므로(CouponIssueSyncConsumer),
+        // 반환값은 알림 발송 대상을 결정하는 데 쓰이므로(saveBatch 내부에서 바로 큐잉),
         // 새로 저장된 이벤트가 빠짐없이 담겨오는지 확인한다.
         assertThat(savedEvents)
                 .extracting(CouponIssueSyncEvent::memberId)
@@ -90,6 +90,40 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         assertThat(expiresAtOf(COUPON_ID, MEMBER_ID_1)).isEqualTo(ISSUED_AT.plusDays(14));
         assertThat(issuedHistoryCount(COUPON_ID, MEMBER_ID_1)).isEqualTo(1);
         assertThat(remainingStockOf(COUPON_ID)).isEqualTo(98);
+        // outbox: coupon_issue 저장과 같은 트랜잭션에서 알림도 PENDING으로 큐잉됐는지 확인
+        assertThat(pendingNotificationCount(COUPON_ID, MEMBER_ID_1, "ISSUE_SUCCESS")).isEqualTo(1);
+        assertThat(pendingNotificationCount(COUPON_ID, MEMBER_ID_2, "ISSUE_SUCCESS")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("실패를 기록할 때 issue_failure_log와 알림 큐잉을 같은 트랜잭션으로 남긴다")
+    void recordsFailureAndQueuesNotificationAtomically() {
+        // given
+        insertCoupon(COUPON_ID, "OPEN");
+        insertMember(MEMBER_ID_1);
+
+        // when
+        repository.recordFailure(COUPON_ID, MEMBER_ID_1, com.mocou.global.exception.ErrorCode.INTERNAL_ERROR, ISSUED_AT);
+
+        // then
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT COUNT(*) FROM issue_failure_log WHERE coupon_id = ? AND member_id = ?",
+                                Integer.class,
+                                COUPON_ID,
+                                MEMBER_ID_1))
+                .isEqualTo(1);
+        assertThat(pendingNotificationCount(COUPON_ID, MEMBER_ID_1, "ISSUE_FAILED")).isEqualTo(1);
+    }
+
+    private int pendingNotificationCount(long couponId, long memberId, String type) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM notification "
+                        + "WHERE coupon_id = ? AND member_id = ? AND type = ? AND status = 'PENDING'",
+                Integer.class,
+                couponId,
+                memberId,
+                type);
     }
 
     @Test

@@ -2,9 +2,10 @@ package com.mocou.lifecycle;
 
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
+import com.mocou.notification.NotificationSender;
+import com.mocou.notification.NotificationType;
 import java.util.Optional;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,12 +16,11 @@ public class CouponUseService {
     static final int MAX_IDEMPOTENCY_KEY_LENGTH = 64;
 
     private final CouponUseRepository repository;
-    private final ApplicationEventPublisher eventPublisher;
+    private final NotificationSender notificationSender;
 
-    public CouponUseService(
-            CouponUseRepository repository, ApplicationEventPublisher eventPublisher) {
+    public CouponUseService(CouponUseRepository repository, NotificationSender notificationSender) {
         this.repository = repository;
-        this.eventPublisher = eventPublisher;
+        this.notificationSender = notificationSender;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -40,9 +40,9 @@ public class CouponUseService {
                 throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT);
             }
             CouponIssueState issue = usedIssue(issueId);
-            // 조건부 갱신의 승자만 이벤트를 발행해 재시도와 동시 요청의 중복 알림을 막는다.
-            eventPublisher.publishEvent(
-                    new CouponUsedEvent(issue.couponIssueId(), issue.couponId(), issue.memberId()));
+
+            notificationSender.notifyMember(
+                    NotificationType.USED, issue.couponId(), issue.memberId());
             return usedResult(issue);
         }
 

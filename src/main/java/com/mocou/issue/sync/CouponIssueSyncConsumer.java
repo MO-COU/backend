@@ -28,8 +28,6 @@ import com.mocou.coupon.CouponStatusChangedEvent;
 import com.mocou.global.exception.ErrorCode;
 import com.mocou.issue.CouponRedisKey;
 import com.mocou.issue.RedisCouponIssueGateway;
-import com.mocou.notification.NotificationSender;
-import com.mocou.notification.NotificationType;
 
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -67,7 +65,6 @@ public class CouponIssueSyncConsumer {
     private final RedisCouponIssueSyncGateway syncGateway;
     private final RedisCouponIssueGateway issueGateway;
     private final CouponIssueSyncRepository repository;
-    private final NotificationSender notificationSender;
     private final CouponIssueSyncProperties properties;
 
     private final StreamBuffer buffer = new StreamBuffer();
@@ -255,6 +252,7 @@ public class CouponIssueSyncConsumer {
         for (MapRecord<String, String, String> record : claimed) {
             CouponIssueSyncEvent event = parse(record);
             issueGateway.compensate(event.couponId(), event.memberId());
+            // outbox: 실패 로그와 알림 큐잉이 recordFailure 안에서 같은 트랜잭션으로 처리된다.
             repository.recordFailure(
                     event.couponId(),
                     event.memberId(),
@@ -314,9 +312,9 @@ public class CouponIssueSyncConsumer {
 
         // saveBatch가 커밋까지 끝난 뒤에만 XACK한다 — 순서가 바뀌면 "ACK는 됐는데
         // 크래시로 DB엔 없는" 영구 유실이 생긴다. 여기서 예외를 안 잡는 이유도 같다:
-        // 실패하면 버퍼/PEL이 그대로 남아 다음 tick에 재시도된다.
-        List<CouponIssueSyncEvent> savedEvents = repository.saveBatch(couponId, events);
-        notifyIssueSuccess(savedEvents);
+        // 실패하면 버퍼/PEL이 그대로 남아 다음 tick에 재시도된다. 성공 알림 큐잉은
+        // saveBatch 안에서 같은 트랜잭션으로 처리된다(outbox).
+        repository.saveBatch(couponId, events);
 
         String[] recordIds = buffer.records.stream()
                 .map(record -> record.getId().getValue())
@@ -325,17 +323,6 @@ public class CouponIssueSyncConsumer {
 
         buffer.records.clear();
         buffer.deadline = null;
-    }
-
-    /**
-     * saveBatch가 커밋까지 끝낸(=실제로 새로 저장된) 이벤트에 대해서만 발급 성공
-     * 알림을 보낸다. 재전달돼 skip된 이벤트는 savedEvents에 없으므로 중복 알림이
-     * 안 나간다.
-     */
-    private void notifyIssueSuccess(List<CouponIssueSyncEvent> savedEvents) {
-        for (CouponIssueSyncEvent event : savedEvents) {
-            notificationSender.notifyMember(NotificationType.ISSUE_SUCCESS, event.couponId(), event.memberId());
-        }
     }
 
     /**
