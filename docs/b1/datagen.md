@@ -23,7 +23,8 @@ docker compose exec redis redis-cli GET "coupon:{301}:stock"     # 10000
 
 | 상황 | 명령 | 소요 |
 | --- | --- | --- |
-| **부하 테스트를 다시 돌린다** | `curl -X POST '.../api/admin/load-test/reset'` | 몇 초 |
+| **회차를 새로 만든다** | `curl -X POST '.../api/admin/coupons' -d '{...}'` | 즉시 |
+| **부하 테스트를 다시 돌린다** | `curl -X POST '.../api/admin/load-test/reset?couponId=302'` | 몇 초 |
 | 더미데이터를 처음부터 다시 만든다 | [4.4.2 전체 초기화](#442-전체-초기화) → 재적재 | 10분 남짓 |
 | 소규모로 빠르게 확인한다 | `--mocou.datagen.member-count=10000 --mocou.datagen.round-count=3` | 수 초 |
 
@@ -286,10 +287,12 @@ DB 데이터까지 다시 만들려면 [4.4.2 전체 초기화](#442-전체-초�
 #### 4.4.1 부하 테스트 리셋
 
 ```bash
-curl -X POST 'http://localhost:8080/api/admin/load-test/reset'
+curl -X POST 'http://localhost:8080/api/admin/load-test/reset?couponId=302'
 ```
 
-시연 회차만 발급 직전 상태로 되돌린다. **지난 회차의 발급 300만 건과 회원 100만은 건드리지 않는다.**
+지정한 회차만 발급 직전 상태로 되돌린다. **지난 회차의 발급 300만 건과 회원 100만은 건드리지 않는다.**
+
+**종료된 회차(`CLOSED`)는 거부한다.** 지난 회차 300개가 모두 `CLOSED`라 잘못 지정해도 막히므로, 오타 하나에 검증 대상이 사라지는 일이 없다.
 
 | 지우는 것 | 되돌리는 것 |
 | --- | --- |
@@ -303,14 +306,15 @@ curl -X POST 'http://localhost:8080/api/admin/load-test/reset'
 | 코드 | 뜻 | 대처 |
 | --- | --- | --- |
 | `LOAD_TEST_SYNC_IN_PROGRESS` | 컨슈머가 아직 DB에 넣는 중이다 | 잠시 뒤 다시 요청한다 |
-| `LOAD_TEST_TARGET_NOT_UNIQUE` | `OPEN` 쿠폰이 없거나 둘 이상이다 | 쿠폰 상태를 확인한다 |
+| `LOAD_TEST_TARGET_CLOSED` | 종료된 회차를 지정했다 | `409`. 되돌릴 수 없다 |
+| `COUPON_NOT_FOUND` | 없는 `couponId`다 | `404` |
 
 <details>
-<summary><b>파라미터가 없는 이유 / 검증 기록을 함께 지우는 이유</b></summary>
+<summary><b>대상 지정 방식이 바뀐 경위 / 검증 기록을 함께 지우는 이유</b></summary>
 
-**대상을 서버가 정한다.** 되돌릴 쿠폰은 `status = 'OPEN'`에서 찾으며, 그런 쿠폰이 하나가 아니면 `409`로 거부한다.
+처음에는 파라미터를 받지 않고 `status = 'OPEN'`인 쿠폰 하나를 서버가 찾았다. 호출한 쪽이 지정하면 지난 회차를 지목할 수 있게 되고, **오타 한 글자에 검증 대상 300만 건이 사라지기** 때문이었다.
 
-호출한 쪽이 지정하게 하면 지난 회차를 지목할 수 있게 되고, **오타 한 글자에 검증 대상 300만 건이 사라진다.** 파라미터가 없으면 `CLOSED` 회차는 지정할 방법 자체가 없다.
+**회차를 직접 만들 수 있게 되면서 `OPEN`이 여럿이 되어** 그 방식으로는 대상을 특정할 수 없다. 대신 `CLOSED`를 거부한다 — 지난 회차가 모두 `CLOSED`라 같은 사고가 나지 않는다.
 
 **검증 기록을 함께 지우는 이유.** 남기면 맥락 없는 숫자만 남는다. `verification_run.issue_run_id`가 채워지지 않아 어느 검증이 어느 회차를 본 것인지 구분할 수 없고, 리셋 뒤에는 그 검증이 본 데이터가 존재하지 않는다.
 
@@ -346,6 +350,43 @@ docker compose exec redis redis-cli FLUSHDB
 - **검증 실행 기록도 함께 지운다.** 데이터를 통째로 다시 만들면 그 데이터를 대상으로 한 검증 결과는 의미가 없고, `verification_run.issue_run_id`가 `coupon_issue_run`을 참조하므로 남겨두면 끊어진 참조가 된다.
 - `FOREIGN_KEY_CHECKS = 0`은 **세션 변수**다. 다른 커넥션에는 영향이 없고 이 스크립트를 실행한 세션에서만 유효하며, 켜져 있는 동안에는 부모 테이블을 지워도 막히지 않는다. **순서를 지키지 않으면 에러 없이 고아 행이 남는다.**
 - Redis를 초기화하지 않으면 기존 재고를 보호하기 위해 `ALREADY_INITIALIZED`가 반환되며, **DB를 다시 생성해도 Redis 재고를 덮어쓰지 않는다.**
+
+---
+
+### 4.5 회차 추가
+
+부하 테스트를 조건을 바꿔가며 여러 번 돌리려면 회차를 직접 만든다. `datagen`을 다시 돌리면 회원 100만과 발급 300만까지 통째로 다시 만들게 된다.
+
+```bash
+curl -X POST 'http://localhost:8080/api/admin/coupons' \
+  -H 'Content-Type: application/json' \
+  -d '{"totalQuantity": 10000, "openAt": "2026-08-26T10:00:00"}'
+```
+
+| 필드 | 필수 | 기본값 |
+| --- | --- | --- |
+| `totalQuantity` | 필수 | — |
+| `openAt` | 필수 | — |
+| `closeAt` | 선택 | **`openAt` 당일 23:59:59** |
+| `name` | 선택 | `아메리카노 무료 쿠폰 {N}회차` |
+
+```json
+{
+  "couponId": 302,
+  "name": "아메리카노 무료 쿠폰 302회차",
+  "openAt": "2026-08-26T10:00:00",
+  "closeAt": "2026-08-26T23:59:59",
+  "totalQuantity": 5000
+}
+```
+
+응답의 `couponId`를 부하 테스트에 넘긴다(`-e COUPON_ID=302`).
+
+**Redis 재고와 발급 시각까지 함께 세운다.** DB에만 회차를 만들면 그 회차는 발급 요청을 전건 거부한다 — 발급 경로가 Redis 재고 키로만 동작하기 때문이다(`F-ISS-003`).
+
+**오픈 시각을 지금으로 주면 즉시 열린 회차가 된다.** 과거 시각도 허용한다.
+
+**상태는 항상 `OPEN`이다.** 오픈 시각 이전 요청은 `status`와 무관하게 Redis가 `NOT_OPEN_YET`으로 거부하므로, 미래에 열릴 회차를 따로 구분하지 않는다.
 
 ---
 

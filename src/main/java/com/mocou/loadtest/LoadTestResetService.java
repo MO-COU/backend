@@ -1,6 +1,5 @@
 package com.mocou.loadtest;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -30,6 +29,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class LoadTestResetService {
 
+    /** 지난 회차에는 검증 대상인 더미데이터가 들어 있어 되돌리면 안 된다. */
+    private static final String CLOSED_STATUS = "CLOSED";
+
     private final LoadTestResetRepository repository;
     private final CouponRedisInitializationService redisInitializationService;
     private final StringRedisTemplate redisTemplate;
@@ -41,8 +43,8 @@ public class LoadTestResetService {
      *
      * @throws BusinessException 대상을 특정할 수 없거나 아직 DB로 반영되지 않은 발급이 남아 있으면
      */
-    public LoadTestResetResult reset() {
-        long couponId = resolveTarget();
+    public LoadTestResetResult reset(long couponId) {
+        rejectIfNotResettable(couponId);
         rejectIfSyncInProgress(couponId);
 
         deleteRedisKeys(couponId);
@@ -60,21 +62,26 @@ public class LoadTestResetService {
     }
 
     /**
-     * 되돌릴 쿠폰을 찾는다.
+     * 되돌려도 되는 회차인지 본다.
      *
-     * <p>호출한 쪽이 지정하지 않는다. 파라미터로 받으면 지난 회차를 지정할 수 있게 되고, 그 회차에는 검증 대상인 발급 300만 건이
-     * 들어 있다. 오타 한 글자에 되돌릴 수 없는 삭제가 일어난다.
+     * <p>처음에는 대상을 받지 않고 {@code OPEN}인 쿠폰 하나를 서버가 찾았다. 오타 한 글자에 지난 회차를 지목하면 검증 대상인
+     * 발급 300만 건이 사라지기 때문이었다. <b>회차를 직접 만들 수 있게 되면서 {@code OPEN}이 여럿이 되어</b> 그 방식으로는
+     * 대상을 특정할 수 없다.
      *
-     * <p>둘 이상이면 어느 쪽을 되돌릴지 서버가 알 수 없으므로 사람에게 넘긴다.
+     * <p>대신 <b>종료된 회차를 거부한다.</b> 지난 회차 300개가 모두 {@code CLOSED}라 지정해도 막히므로, 파라미터를
+     * 받아도 같은 사고가 나지 않는다.
      */
-    private long resolveTarget() {
-        List<Long> openCoupons = repository.findOpenCouponIds();
-        if (openCoupons.size() != 1) {
+    private void rejectIfNotResettable(long couponId) {
+        String status = repository.findStatus(couponId);
+        if (status == null) {
             throw new BusinessException(
-                    ErrorCode.LOAD_TEST_TARGET_NOT_UNIQUE,
-                    "발급을 여는 쿠폰이 %d개다. 되돌릴 대상은 하나여야 한다".formatted(openCoupons.size()));
+                    ErrorCode.COUPON_NOT_FOUND, "쿠폰 %d를 찾을 수 없습니다".formatted(couponId));
         }
-        return openCoupons.get(0);
+        if (CLOSED_STATUS.equals(status)) {
+            throw new BusinessException(
+                    ErrorCode.LOAD_TEST_TARGET_CLOSED,
+                    "쿠폰 %d는 종료된 회차다. 되돌리면 복구할 방법이 재적재뿐이다".formatted(couponId));
+        }
     }
 
     /**
