@@ -16,7 +16,7 @@ Logback은 현재 로그 파일이 없으면 생성하고, 있으면 이어서 �
 
 ### 운영 Docker 보관
 
-운영 Compose는 기본 경로인 `/app/logs`에 named volume `app-logs`를 마운트한다. 따라서 앱 컨테이너가 새 이미지로 교체되어도 로그 파일과 보관 로그는 유지되며, `docker volume rm`으로 해당 볼륨을 명시적으로 삭제할 때만 함께 사라진다.
+운영 Compose는 기본 경로인 `/app/logs`에 named volume `app-logs`를 마운트한다. 따라서 앱 컨테이너가 새 이미지로 교체되어도 로그 파일과 보관 로그는 유지되며, `docker compose down -v` 또는 `docker volume rm`으로 해당 볼륨을 삭제할 때만 함께 사라진다.
 
 `LOG_PATH`를 기본값과 다른 경로로 지정하면 Compose의 `app-logs` 마운트 대상도 같은 경로로 변경해야 한다. 그렇지 않으면 새 경로의 로그는 컨테이너 교체 시 보존되지 않는다.
 
