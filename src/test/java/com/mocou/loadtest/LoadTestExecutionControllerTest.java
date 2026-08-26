@@ -127,6 +127,7 @@ class LoadTestExecutionControllerTest {
                 null,
                 OffsetDateTime.parse("2026-08-25T10:00:00+09:00"),
                 null,
+                null,
                 "부하 테스트를 시작했습니다.");
     }
 }

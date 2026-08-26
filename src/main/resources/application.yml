@@ -38,9 +38,9 @@ mocou:
   load-test:
     ssm:
       region: ${AWS_REGION:ap-northeast-2}
-      instance-id: ${MOCOU_LOAD_TEST_SSM_INSTANCE_ID:}
-      work-directory: ${MOCOU_LOAD_TEST_WORK_DIRECTORY:/home/ubuntu/mocou-backend}
+      instance-id: ${MOCOU_INSTANCE_ID_K6:}
+      work-directory: ${MOCOU_K6_WORK_DIRECTORY:/home/ubuntu/mocou-backend}
       # k6 EC2는 앱 EC2와 분리되어 있으므로 localhost 기본값을 두지 않는다.
-      target-url: ${MOCOU_LOAD_TEST_TARGET_URL:}
+      target-url: ${MOCOU_K6_TARGET_URL:}
       poll-interval-seconds: 2
       timeout-seconds: 900

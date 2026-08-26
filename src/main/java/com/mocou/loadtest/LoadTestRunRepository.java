@@ -26,7 +26,7 @@ public class LoadTestRunRepository {
     public boolean existsRunning() {
         Integer count =
                 jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM coupon_issue_run WHERE status IN ('PENDING', 'RUNNING')",
+                        "SELECT COUNT(*) FROM coupon_issue_run WHERE status IN ('PENDING', 'RUNNING', 'SYNCING')",
                         Integer.class);
         return count != null && count > 0;
     }
@@ -107,8 +107,15 @@ public class LoadTestRunRepository {
         return key.longValue();
     }
 
-    public void complete(long runId, LoadTestRunResult result) {
-        finish(runId, result, LoadTestRunStatus.SUCCESS);
+    public void markSyncing(long runId, LoadTestRunResult result) {
+        finish(runId, result, LoadTestRunStatus.SYNCING);
+    }
+
+    public void completeDbSync(long runId) {
+        jdbcTemplate.update(
+                "UPDATE coupon_issue_run SET status = 'SUCCESS', db_sync_finished_at = ? WHERE run_id = ?",
+                Timestamp.valueOf(LocalDateTime.now(SERVICE_ZONE)),
+                runId);
     }
 
     public void finish(long runId, LoadTestRunResult result, LoadTestRunStatus status) {
@@ -134,7 +141,7 @@ public class LoadTestRunRepository {
 
     public void fail(long runId) {
         jdbcTemplate.update(
-                "UPDATE coupon_issue_run SET status = 'FAILED', finished_at = ? WHERE run_id = ?",
+                "UPDATE coupon_issue_run SET status = 'FAILED', finished_at = COALESCE(finished_at, ?) WHERE run_id = ?",
                 Timestamp.valueOf(LocalDateTime.now(SERVICE_ZONE)),
                 runId);
     }
@@ -145,7 +152,8 @@ public class LoadTestRunRepository {
                         """
                         SELECT run_id, coupon_id, scenario_version, status, vus, ramp_up_seconds,
                                requested_count, issued_count, failed_count, sold_out_count,
-                               duplicate_count, error_count, p95_ms, started_at, finished_at
+                               duplicate_count, error_count, p95_ms, started_at, finished_at,
+                               db_sync_finished_at
                           FROM coupon_issue_run
                          WHERE run_id = ?
                         """,
@@ -166,6 +174,7 @@ public class LoadTestRunRepository {
                                         (Integer) resultSet.getObject("p95_ms"),
                                         toOffsetDateTime(resultSet.getTimestamp("started_at")),
                                         toOffsetDateTime(resultSet.getTimestamp("finished_at")),
+                                        toOffsetDateTime(resultSet.getTimestamp("db_sync_finished_at")),
                                         null),
                         runId)
                 .stream()

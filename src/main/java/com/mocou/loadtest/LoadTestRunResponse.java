@@ -18,4 +18,5 @@ public record LoadTestRunResponse(
         Integer p95Ms,
         OffsetDateTime startedAt,
         OffsetDateTime finishedAt,
+        OffsetDateTime dbSyncFinishedAt,
         String message) {}

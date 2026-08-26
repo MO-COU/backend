@@ -49,7 +49,12 @@ public class LoadTestExecutionController {
                 .body(ApiResponse.success(service.start(request)));
     }
 
-    @Operation(summary = "부하 테스트 상태 조회", description = "실행 번호로 진행 상태와 결과를 조회한다.")
+    @Operation(
+            summary = "부하 테스트 상태 조회",
+            description =
+                    "실행 번호로 진행 상태와 결과를 조회한다. RUNNING은 k6 실행 중, SYNCING은 DB 적재 대기 중, "
+                            + "SUCCESS는 DB 적재까지 완료된 상태다. finishedAt은 k6 종료 시각이고 "
+                            + "dbSyncFinishedAt은 DB 적재 완료 시각이다.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "200", description = "실행 상태 및 결과 조회 성공"),

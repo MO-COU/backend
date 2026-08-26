@@ -52,6 +52,7 @@ class LoadTestExecutionServiceTest {
                 null,
                 null,
                 null,
+                null,
                 "부하 테스트를 시작했습니다.");
     }
 }

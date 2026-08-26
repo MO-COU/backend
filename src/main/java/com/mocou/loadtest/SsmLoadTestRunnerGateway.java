@@ -25,16 +25,19 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
     private final SsmClient ssmClient;
     private final LoadTestSsmProperties properties;
     private final LoadTestRunRepository repository;
+    private final LoadTestDbSyncMonitor dbSyncMonitor;
     private final ObjectMapper objectMapper;
 
     public SsmLoadTestRunnerGateway(
             SsmClient ssmClient,
             LoadTestSsmProperties properties,
             LoadTestRunRepository repository,
+            LoadTestDbSyncMonitor dbSyncMonitor,
             ObjectMapper objectMapper) {
         this.ssmClient = ssmClient;
         this.properties = properties;
         this.repository = repository;
+        this.dbSyncMonitor = dbSyncMonitor;
         this.objectMapper = objectMapper;
     }
 
@@ -50,7 +53,7 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
                     commandId,
                     request.scenario(),
                     request.couponId());
-            waitForCompletion(runId, commandId);
+            waitForCompletion(runId, request.couponId(), commandId);
         } catch (Exception exception) {
             repository.fail(runId);
             log.error("k6 SSM 실행 실패: runId={}", runId, exception);
@@ -72,7 +75,8 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
                 .commandId();
     }
 
-    private void waitForCompletion(long runId, String commandId) throws InterruptedException {
+    private void waitForCompletion(long runId, long couponId, String commandId)
+            throws InterruptedException {
         // SSM 완료까지 조회함. 완료 후 실행 결과를 저장함.
         Instant deadline = Instant.now().plusSeconds(properties.timeoutSeconds());
         while (Instant.now().isBefore(deadline)) {
@@ -85,7 +89,10 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
                                         .build());
                 CommandInvocationStatus status = invocation.status();
                 if (status == CommandInvocationStatus.SUCCESS) {
-                    repository.complete(runId, parseResult(invocation.standardOutputContent()));
+                    LoadTestRunResult result = parseResult(invocation.standardOutputContent());
+                    repository.markSyncing(runId, result);
+                    dbSyncMonitor.waitUntilComplete(couponId, result.issuedCount());
+                    repository.completeDbSync(runId);
                     return;
                 }
                 if (status == CommandInvocationStatus.CANCELLED
@@ -159,10 +166,10 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
 
     private void validateConfiguration() {
         if (properties.instanceId() == null || properties.instanceId().isBlank()) {
-            throw new IllegalStateException("MOCOU_LOAD_TEST_SSM_INSTANCE_ID가 필요합니다");
+            throw new IllegalStateException("MOCOU_INSTANCE_ID_K6가 필요합니다");
         }
         if (properties.targetUrl() == null || properties.targetUrl().isBlank()) {
-            throw new IllegalStateException("MOCOU_LOAD_TEST_TARGET_URL이 필요합니다");
+            throw new IllegalStateException("MOCOU_K6_TARGET_URL이 필요합니다");
         }
     }
 }

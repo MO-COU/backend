@@ -48,6 +48,10 @@ Content-Type: application/json
 위 표는 시연할 때 사용할 기본 조합일 뿐 API가 강제하는 매핑이 아니다. 예를 들어 301회차에서
 `V2_SPIKE_20000`을 선택할 수도 있다. 선택한 회차는 `OPEN`이고 DB와 Redis 모두 발급 전 초기 상태여야 한다.
 
+상태 조회 API는 `RUNNING → SYNCING → SUCCESS` 순서로 바뀐다. `finishedAt`은 k6 요청 종료
+시각이고 `dbSyncFinishedAt`은 Redis Stream의 발급 이벤트가 DB에 모두 적재된 시각이다.
+DB 건수, Stream 잔여 건수와 pending 건수가 60초 안에 모두 맞지 않으면 실행은 `FAILED`가 된다.
+
 모든 발급 스크립트는 실제 발급 상태를 변경한다. 테스트마다 전용 쿠폰을 사용하고 DB와 Redis를 초기 상태로 복구한다.
 
 ## 사전 준비
