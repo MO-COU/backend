@@ -25,7 +25,24 @@ class AdminCouponServiceTest {
 
     @Mock private AdminCouponRepository repository;
     @Mock private AdminCouponRealtimeStockRepository realtimeStockRepository;
+    @Mock private RedisAdminCouponIssueResultRepository issueResultRepository;
     @InjectMocks private AdminCouponService service;
+
+    @Test
+    @DisplayName("존재하는 쿠폰의 실시간 발급 결과를 조회한다")
+    void returnsRealtimeIssueResultCounts() {
+        // given
+        AdminCouponIssueResultCounts counts =
+                AdminCouponIssueResultCounts.of(COUPON_ID, 8_320, 1_200, 420, 30, 30, 0, 0, 20);
+        given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(issueResultRepository.findCounts(COUPON_ID)).willReturn(counts);
+
+        // when
+        AdminCouponIssueResultCounts result = service.getIssueResultCounts(COUPON_ID);
+
+        // then
+        assertThat(result).isEqualTo(counts);
+    }
 
     @Test
     @DisplayName("쿠폰 발급 이력을 페이지 단위로 조회한다")
