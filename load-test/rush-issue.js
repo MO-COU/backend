@@ -1,3 +1,4 @@
+// V1: 20,000 VU를 60초 동안 늘려 반복 요청함.
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';

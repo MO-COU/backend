@@ -1,3 +1,4 @@
+// V6: 20,000명이 각각 1~3회 요청함.
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';

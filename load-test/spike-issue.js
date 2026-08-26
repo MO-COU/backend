@@ -1,3 +1,4 @@
+// V2, V3: 20,000명 또는 50,000명이 한 번씩 요청함.
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';

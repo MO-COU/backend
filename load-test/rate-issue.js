@@ -1,3 +1,4 @@
+// V5: 초당 4,000건씩 5초 동안 요청함.
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';
