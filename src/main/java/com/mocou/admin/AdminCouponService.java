@@ -28,7 +28,8 @@ public class AdminCouponService {
     public AdminCouponIssueResultCounts getIssueResultCounts(long couponId) {
         validateCouponId(couponId);
         validateCouponExists(couponId);
-        return issueResultRepository.findCounts(couponId);
+        AdminCouponIssueResultCounts counts = issueResultRepository.findCounts(couponId);
+        return counts.withPersistenceProgress(repository.countIssues(couponId));
     }
 
     @Transactional(readOnly = true)

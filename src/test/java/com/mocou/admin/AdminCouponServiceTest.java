@@ -35,13 +35,15 @@ class AdminCouponServiceTest {
         AdminCouponIssueResultCounts counts =
                 AdminCouponIssueResultCounts.of(COUPON_ID, 8_320, 1_200, 420, 30, 30, 0, 0, 20);
         given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(repository.countIssues(COUPON_ID)).willReturn(7_980L);
         given(issueResultRepository.findCounts(COUPON_ID)).willReturn(counts);
 
         // when
         AdminCouponIssueResultCounts result = service.getIssueResultCounts(COUPON_ID);
 
         // then
-        assertThat(result).isEqualTo(counts);
+        assertThat(result.dbPersisted()).isEqualTo(7_980);
+        assertThat(result.pendingOrRetrying()).isEqualTo(320);
     }
 
     @Test

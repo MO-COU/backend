@@ -11,7 +11,9 @@ public record AdminCouponIssueResultCounts(
         long issueClosed,
         long stockNotInitialized,
         long metadataNotInitialized,
-        long compensated) {
+        long compensated,
+        long dbPersisted,
+        long pendingOrRetrying) {
 
     public static AdminCouponIssueResultCounts of(
             long couponId,
@@ -42,6 +44,29 @@ public record AdminCouponIssueResultCounts(
                 issueClosed,
                 stockNotInitialized,
                 metadataNotInitialized,
-                compensated);
+                compensated,
+                0,
+                0);
+    }
+
+    public AdminCouponIssueResultCounts withPersistenceProgress(long dbPersisted) {
+        long notPersisted = reserved > dbPersisted ? reserved - dbPersisted : 0;
+        long pendingOrRetrying =
+                notPersisted > compensated ? notPersisted - compensated : 0;
+
+        return new AdminCouponIssueResultCounts(
+                couponId,
+                totalRequests,
+                reserved,
+                failed,
+                soldOut,
+                duplicateIssue,
+                notOpenYet,
+                issueClosed,
+                stockNotInitialized,
+                metadataNotInitialized,
+                compensated,
+                dbPersisted,
+                pendingOrRetrying);
     }
 }
