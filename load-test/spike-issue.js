@@ -1,3 +1,4 @@
+// V2, V3: 같은 spike 방식으로 20,000명 또는 50,000명이 한 번씩 요청함.
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';
@@ -93,6 +94,6 @@ export function handleSummary(data) {
   };
   return {
     stdout: `MOCOU_RESULT=${JSON.stringify(result)}\n`,
-    [__ENV.SUMMARY_FILE || 'summary.json']: JSON.stringify(data),
+    [__ENV.SUMMARY_FILE || 'summary.json']: JSON.stringify(result),
   };
 }
