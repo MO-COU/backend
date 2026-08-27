@@ -57,6 +57,12 @@ services:
       MOCOU_INSTANCE_ID_K6: ${MOCOU_INSTANCE_ID_K6}
       MOCOU_K6_WORK_DIRECTORY: ${MOCOU_K6_WORK_DIRECTORY:-/home/ubuntu/backend}
       MOCOU_K6_TARGET_URL: ${MOCOU_K6_TARGET_URL}
+
+      # Tomcat 동시 연결 한도. 부하테스트 시나리오마다 필요한 값이 달라 코드 배포 없이
+      # 이 .env만 바꾸고 재기동(up -d)하면 반영된다. 기본값은 application-prod.yml과 동일.
+      SERVER_TOMCAT_MAX_CONNECTIONS: ${SERVER_TOMCAT_MAX_CONNECTIONS:-30000}
+      SERVER_TOMCAT_ACCEPT_COUNT: ${SERVER_TOMCAT_ACCEPT_COUNT:-2000}
+      SERVER_TOMCAT_THREADS_MAX: ${SERVER_TOMCAT_THREADS_MAX:-400}
     ports:
       - "8080:8080"
 
