@@ -31,5 +31,13 @@ public enum VerificationRule {
     TOOL_RELIABILITY,
 
     /** Redis 발급 집합·재고가 DB 이력과 어긋나는가. 동기화가 끝나지 않았으면 판정하지 않는다. */
-    REDIS_DB_MISMATCH
+    REDIS_DB_MISMATCH,
+
+    /**
+     * Redis가 확정한 예약 순번과 차감 후 잔여 재고가 서로, 그리고 총재고와 맞는가.
+     *
+     * <p>발급 순서를 정하는 권위는 Redis Lua의 원자적 실행뿐이라 DB 안에는 대조할 순서가 없다. 대신 같은 실행이 만든 두 개의
+     * 독립 카운터({@code INCR} 순번, {@code DECR} 재고)를 DB가 원래 갖고 있던 총재고와 맞춰본다.
+     */
+    ISSUE_SEQUENCE_MISMATCH
 }
