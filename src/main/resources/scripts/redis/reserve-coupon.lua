@@ -1,7 +1,26 @@
 -- KEYS[1]: coupon:{couponId}:stock
--- KEYS[2]: coupon:{couponId}:issued-members
+-- KEYS[2]: coupon:{couponId}:issued-members (Sorted Set)
 -- KEYS[3]: coupon:{couponId}:metadata
+-- KEYS[4]: coupon:{couponId}:issue-sequence
 -- ARGV[1]: memberId
+
+local issuedMembersType = redis.call('TYPE', KEYS[2]).ok
+
+if issuedMembersType ~= 'none'
+        and issuedMembersType ~= 'zset' then
+    return redis.error_reply(
+        'coupon issued members key must be a sorted set'
+    )
+end
+
+local issueSequenceType = redis.call('TYPE', KEYS[4]).ok
+
+if issueSequenceType ~= 'none'
+        and issueSequenceType ~= 'string' then
+    return redis.error_reply(
+        'coupon issue sequence key must be a string'
+    )
+end
 
 local stock = redis.call('GET', KEYS[1])
 
@@ -58,7 +77,7 @@ if currentEpochSecond >= numericCloseAt then
 end
 
 -- 이미 발급받은 회원인지 확인
-if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then
+if redis.call('ZSCORE', KEYS[2], ARGV[1]) then
     return -1
 end
 
@@ -76,8 +95,38 @@ if numericStock <= 0 then
     return 0
 end
 
--- 재고 차감과 발급 회원 등록을 원자적으로 처리
+-- 재고 차감과 전역 순번 발급을 원자적으로 처리
 redis.call('DECR', KEYS[1])
-redis.call('SADD', KEYS[2], ARGV[1])
+
+local issueSequenceResult = redis.pcall(
+    'INCR',
+    KEYS[4]
+)
+
+if type(issueSequenceResult) == 'table'
+        and issueSequenceResult.err then
+    redis.call('INCR', KEYS[1])
+    return redis.error_reply(issueSequenceResult.err)
+end
+
+local added = redis.pcall(
+    'ZADD',
+    KEYS[2],
+    'NX',
+    issueSequenceResult,
+    ARGV[1]
+)
+
+if type(added) == 'table' and added.err then
+    redis.call('INCR', KEYS[1])
+    redis.call('DECR', KEYS[4])
+    return redis.error_reply(added.err)
+end
+
+if added == 0 then
+    redis.call('INCR', KEYS[1])
+    redis.call('DECR', KEYS[4])
+    return -1
+end
 
 return 1

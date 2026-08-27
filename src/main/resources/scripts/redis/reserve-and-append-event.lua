@@ -1,8 +1,9 @@
 -- KEYS[1]: coupon:{couponId}:stock
--- KEYS[2]: coupon:{couponId}:issued-members
+-- KEYS[2]: coupon:{couponId}:issued-members (Sorted Set)
 -- KEYS[3]: coupon:{couponId}:metadata
 -- KEYS[4]: coupon:{couponId}:issue-stream
 -- KEYS[5]: coupon:{couponId}:issue-result-counts
+-- KEYS[6]: coupon:{couponId}:issue-sequence
 --
 -- ARGV[1]: memberId
 -- ARGV[2]: eventId
@@ -14,6 +15,26 @@ local resultCountsType = redis.call('TYPE', KEYS[5]).ok
 if resultCountsType ~= 'none' and resultCountsType ~= 'hash' then
     return redis.error_reply(
         'coupon issue result counts key must be a hash'
+    )
+end
+
+-- 발급 순번 Key가 존재한다면 String이어야 한다
+local issueSequenceType = redis.call('TYPE', KEYS[6]).ok
+
+if issueSequenceType ~= 'none'
+        and issueSequenceType ~= 'string' then
+    return redis.error_reply(
+        'coupon issue sequence key must be a string'
+    )
+end
+
+-- 발급 회원 Key가 존재한다면 Sorted Set이어야 한다
+local issuedMembersType = redis.call('TYPE', KEYS[2]).ok
+
+if issuedMembersType ~= 'none'
+        and issuedMembersType ~= 'zset' then
+    return redis.error_reply(
+        'coupon issued members key must be a sorted set'
     )
 end
 
@@ -109,7 +130,7 @@ if currentEpochSecond >= numericCloseAt then
 end
 
 -- 이미 발급받은 회원인지 확인
-if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then
+if redis.call('ZSCORE', KEYS[2], ARGV[1]) then
     return countAndReturn(
         'DUPLICATE_ISSUE',
         -1
@@ -146,9 +167,49 @@ if streamType ~= 'none' and streamType ~= 'stream' then
     )
 end
 
--- Redis 예약 상태 반영
-redis.call('DECR', KEYS[1])
-redis.call('SADD', KEYS[2], ARGV[1])
+-- Redis 재고 차감
+local remainingAtIssue = redis.call('DECR', KEYS[1])
+
+-- 모든 Spring 인스턴스가 공유하는 Redis Lua 예약 성공 순번
+local issueSequenceResult = redis.pcall(
+    'INCR',
+    KEYS[6]
+)
+
+if type(issueSequenceResult) == 'table'
+        and issueSequenceResult.err then
+    redis.call('INCR', KEYS[1])
+
+    return redis.error_reply(issueSequenceResult.err)
+end
+
+local issueSequence = issueSequenceResult
+
+-- 발급 성공 회원과 Redis 전역 순번을 하나의 Sorted Set에 저장
+local issuedMemberResult = redis.pcall(
+    'ZADD',
+    KEYS[2],
+    'NX',
+    issueSequence,
+    ARGV[1]
+)
+
+if type(issuedMemberResult) == 'table'
+        and issuedMemberResult.err then
+    redis.call('INCR', KEYS[1])
+    redis.call('DECR', KEYS[6])
+
+    return redis.error_reply(issuedMemberResult.err)
+end
+
+if issuedMemberResult == 0 then
+    redis.call('INCR', KEYS[1])
+    redis.call('DECR', KEYS[6])
+    return countAndReturn(
+        'DUPLICATE_ISSUE',
+        -1
+    )
+end
 
 -- 같은 Lua 안에서 발급 예약 이벤트 기록
 local streamEntryId = redis.pcall(
@@ -160,11 +221,15 @@ local streamEntryId = redis.pcall(
     'eventType',
     'COUPON_ISSUE_RESERVED',
     'schemaVersion',
-    '1',
+    '2',
     'couponId',
     ARGV[3],
     'memberId',
     ARGV[1],
+    'issueSequence',
+    tostring(issueSequence),
+    'remainingAtIssue',
+    tostring(remainingAtIssue),
     'reservedAtEpochSecond',
     redisTime[1]
 )
@@ -172,7 +237,8 @@ local streamEntryId = redis.pcall(
 -- XADD 실패 시 같은 Script 안에서 예약 상태 원복
 if type(streamEntryId) == 'table' and streamEntryId.err then
     redis.call('INCR', KEYS[1])
-    redis.call('SREM', KEYS[2], ARGV[1])
+    redis.call('ZREM', KEYS[2], ARGV[1])
+    redis.call('DECR', KEYS[6])
 
     return redis.error_reply(streamEntryId.err)
 end
@@ -187,8 +253,9 @@ local countResult = redis.pcall(
 -- Counter 기록 실패 시 예약과 Stream 이벤트까지 원복
 if type(countResult) == 'table' and countResult.err then
     redis.call('INCR', KEYS[1])
-    redis.call('SREM', KEYS[2], ARGV[1])
+    redis.call('ZREM', KEYS[2], ARGV[1])
     redis.call('XDEL', KEYS[4], streamEntryId)
+    redis.call('DECR', KEYS[6])
 
     return redis.error_reply(countResult.err)
 end

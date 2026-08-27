@@ -1,11 +1,12 @@
 package com.mocou.loadtest;
 
-import com.mocou.global.exception.BusinessException;
-import com.mocou.global.exception.ErrorCode;
-import com.mocou.issue.CouponRedisKey;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
+import com.mocou.issue.CouponRedisKey;
 
 /** 실행 전 Redis 상태 확인함. */
 @Component
@@ -42,11 +43,13 @@ public class LoadTestRedisReadinessValidator {
             throw notReady("Redis 쿠폰 발급 시간 정보가 올바르지 않습니다");
         }
 
-        Long issuedMembers = redisTemplate.opsForSet().size(CouponRedisKey.issuedMembers(couponId));
+        Long issuedMembers = redisTemplate.opsForZSet().size(CouponRedisKey.issuedMembers(couponId));
         Long streamLength = redisTemplate.opsForStream().size(CouponRedisKey.issueStream(couponId));
+        Long dlqStreamLength = redisTemplate.opsForStream().size(CouponRedisKey.issueDlqStream(couponId));
         Long resultCounts = redisTemplate.opsForHash().size(CouponRedisKey.issueResultCounts(couponId));
-        // 이전 실행 값이 남아 있으면 결과 비교 불가.
-        if (positive(issuedMembers) || positive(streamLength) || positive(resultCounts)) {
+        // 이전 실행 값이 남아 있으면 결과 비교 불가. DLQ에 이전 실행의 미복구 이벤트가 남아 있으면
+        // 이번 실행 도중 DLQ 복구 컨슈머가 그걸 건드려 결과가 오염된다.
+        if (positive(issuedMembers) || positive(streamLength) || positive(dlqStreamLength) || positive(resultCounts)) {
             throw notReady("이전 실행의 Redis 데이터가 남아 있습니다. 해당 회차를 초기화해 주세요");
         }
     }

@@ -9,7 +9,7 @@ global/
 ├── response/    ApiResponse, ErrorResponse       — 모든 API의 공통 응답 형식
 ├── exception/   ErrorCode, BusinessException,
 │                GlobalExceptionHandler           — 실패 코드 정의 + 예외 → 응답 자동 변환
-├── logging/     TraceIdFilter                    — 요청별 추적 ID 부여
+├── logging/     TraceIdFilter, SafeExceptionLog  — 요청 추적 ID와 안전한 예외 로그
 └── masking/     MaskingUtils                     — 개인정보 마스킹
 ```
 
@@ -64,7 +64,7 @@ if (coupon == null) {
 | `RedisConnectionFailureException` | Redis 연결 실패 | `SERVICE_UNAVAILABLE` |
 | `Exception`(그 외 전부) | NPE, DB 오류 등 예상 못 한 예외 | `SYSTEM_ERROR` |
 
-마지막 `Exception` 핸들러가 **최후의 안전망**입니다 — 위 네 가지에 안 걸리는 모든 예외를 잡아서, 클라이언트에게는 `SYSTEM_ERROR`라는 안전한 일반 메시지만 내려주고, 실제 원인(전체 스택트레이스)은 `log.error(...)`로 서버 로그에만 남깁니다. 이 로그는 `TraceIdFilter`가 심어둔 traceId와 함께 찍히므로, 클라이언트가 응답의 `traceId`를 알려주면 로그에서 바로 원인을 찾을 수 있습니다. 이 핸들러가 없으면 처리 안 된 예외는 Spring 기본 에러 응답이 그대로 나가서 "모든 API가 동일한 응답 형식을 쓴다"는 규칙이 깨집니다.
+마지막 `Exception` 핸들러가 **최후의 안전망**입니다 — 위 네 가지에 안 걸리는 모든 예외를 잡아서, 클라이언트에게는 `SYSTEM_ERROR`라는 안전한 일반 메시지만 내려주고, 실제 원인은 `log.error(...)`로 서버 로그에 남깁니다. 로그에는 원문 예외 메시지나 전체 예외 객체를 넘기지 않고, 예외 유형 체인과 해당 예외의 스택 프레임만 남깁니다. 이 로그는 `TraceIdFilter`가 심어둔 traceId와 함께 찍히므로, 클라이언트가 응답의 `traceId`를 알려주면 로그에서 바로 원인을 찾을 수 있습니다. 이 핸들러가 없으면 처리 안 된 예외는 Spring 기본 에러 응답이 그대로 나가서 "모든 API가 동일한 응답 형식을 쓴다"는 규칙이 깨집니다.
 
 ## `logging` — 요청 추적
 
@@ -73,6 +73,8 @@ if (coupon == null) {
 - 부하테스트(k6)에서 특정 요청 하나를 로그에서 추적하고 싶으면, 요청 보낼 때 `X-Trace-Id` 헤더를 직접 지정하면 그 값이 그대로 쓰입니다.
 - 헤더 값은 정규식(`^[A-Za-z0-9._-]{1,64}$`)으로 검증합니다 — 클라이언트가 로그 인젝션을 노리고 이상한 문자열을 보낼 수 있어서, 형식이 안 맞으면 무시하고 새로 발급합니다.
 - 요청이 끝나면 `MDC.remove()`로 반드시 지웁니다 — 톰캣 스레드가 재사용되기 때문에, 안 지우면 다음 요청이 이전 추적 ID를 이어받는 버그가 생깁니다.
+
+**`SafeExceptionLog`**: 예외 메시지 대신 예외 유형 체인과 스택 프레임만 만들어 시스템 오류 로그에 전달합니다. 예외 메시지에 이메일·토큰 등 민감 정보가 포함될 수 있으므로, 시스템 오류 핸들러와 재시도 가능한 비동기 처리 실패 로그에서 이 도우미를 사용합니다.
 
 ## 아직 없는 것
 

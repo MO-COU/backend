@@ -101,6 +101,31 @@ public class JdbcNotificationRepository implements NotificationRepository {
     }
 
     @Override
+    public NotificationStatusCounts countIssueSuccessByCouponId(long couponId) {
+        try {
+            return jdbcTemplate.queryForObject(
+                    """
+                    SELECT COUNT(*) AS total_count,
+                           COALESCE(SUM(CASE WHEN status = 'SENT' THEN 1 ELSE 0 END), 0) AS sent_count,
+                           COALESCE(SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending_count,
+                           COALESCE(SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END), 0) AS failed_count
+                    FROM notification
+                    WHERE coupon_id = ? AND type = 'ISSUE_SUCCESS'
+                    """,
+                    (rs, rowNum) ->
+                            new NotificationStatusCounts(
+                                    rs.getLong("total_count"),
+                                    rs.getLong("sent_count"),
+                                    rs.getLong("pending_count"),
+                                    rs.getLong("failed_count")),
+                    couponId);
+        } catch (DataAccessException e) {
+            log.error("회차별 발급 성공 알림 상태 집계에 실패했습니다. couponId={}", couponId, e);
+            throw new BusinessException(ErrorCode.NOTIFICATION_DISPATCH_FAILED);
+        }
+    }
+
+    @Override
     public void markSentBatch(List<Long> notificationIds, LocalDateTime sentAt) {
         if (notificationIds.isEmpty()) {
             return;

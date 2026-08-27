@@ -66,6 +66,10 @@ abstract class RedisCouponIssueSyncIntegrationTestSupport {
         return CouponRedisKey.issueStream(COUPON_ID);
     }
 
+    protected String dlqStreamKey() {
+        return CouponRedisKey.issueDlqStream(COUPON_ID);
+    }
+
     protected void setStock(int stock) {
         redisTemplate.opsForValue().set(stockKey(), Integer.toString(stock));
     }

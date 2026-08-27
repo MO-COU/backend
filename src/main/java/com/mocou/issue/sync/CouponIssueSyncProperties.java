@@ -26,17 +26,26 @@ public class CouponIssueSyncProperties {
     // 엔트리(최대 batchWindowMs 동안 PEL에 안 ACK된 채로 있는 게 정상)를
     // "죽은 컨슈머가 두고 간 것"으로 착각해 재처리하지 않기 위함.
     @Min(1)
-    private long pendingMinIdleMs = 30_000;
+    private long pendingMinIdleMs = 10_000;
 
     // XPENDING 확인도 매 틱마다 하면 낭비라 이 간격으로만 확인한다.
     @Min(1)
     private long pendingCheckIntervalMs = 10_000;
 
     // PendingMessage.totalDeliveryCount(Redis가 직접 세는 누적 배달 횟수)가 이 값을
-    // 넘으면 더 이상 재처리하지 않고 포기(보상+실패 로그)한다 — 별도 재시도
+    // 넘으면 메인 스트림에서는 더 이상 재처리하지 않고 DLQ로 넘긴다 — 별도 재시도
     // 카운터를 우리가 들고 다닐 필요가 없다.
     @Min(1)
-    private int maxDeliveryCount = 5;
+    private int maxDeliveryCount = 3;
+
+    // DLQ 복구는 메인 스트림보다 여유 있게 재시도한다 — DB가 회복될 시간을 벌어주는
+    // 게 목적이라 pendingMinIdleMs보다 길게 잡는다.
+    @Min(1)
+    private long dlqPendingMinIdleMs = 20_000;
+
+    // DLQ에서마저 이 값을 넘겨 배달되면 그때 비로소 최종 포기(보상+실패 로그)한다.
+    @Min(1)
+    private int dlqMaxDeliveryCount = 5;
 
     public int getChunkSize() {
         return chunkSize;
@@ -76,5 +85,21 @@ public class CouponIssueSyncProperties {
 
     public void setMaxDeliveryCount(int maxDeliveryCount) {
         this.maxDeliveryCount = maxDeliveryCount;
+    }
+
+    public long getDlqPendingMinIdleMs() {
+        return dlqPendingMinIdleMs;
+    }
+
+    public void setDlqPendingMinIdleMs(long dlqPendingMinIdleMs) {
+        this.dlqPendingMinIdleMs = dlqPendingMinIdleMs;
+    }
+
+    public int getDlqMaxDeliveryCount() {
+        return dlqMaxDeliveryCount;
+    }
+
+    public void setDlqMaxDeliveryCount(int dlqMaxDeliveryCount) {
+        this.dlqMaxDeliveryCount = dlqMaxDeliveryCount;
     }
 }

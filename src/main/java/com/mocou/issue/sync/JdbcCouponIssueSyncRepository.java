@@ -120,6 +120,19 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
         notificationSender.notifyMember(NotificationType.ISSUE_FAILED, couponId, memberId);
     }
 
+    // recordFailure와 달리 알림을 보내지 않는다 — 아직 최종 실패가 아니라 DLQ 복구를
+    // 시도하는 중이다.
+    @Override
+    @Transactional
+    public void recordRetryEscalation(long couponId, long memberId, ErrorCode reason, LocalDateTime occurredAt) {
+        jdbcClient.sql(INSERT_ISSUE_FAILURE_LOG)
+                .param("couponId", couponId)
+                .param("memberId", memberId)
+                .param("failureReason", reason.name())
+                .param("occurredAt", occurredAt)
+                .update();
+    }
+
     /** @return 새로 저장했으면 true, 재전달된 중복이라 skip했으면 false */
     private boolean saveOne(CouponIssueSyncEvent event) {
         try {

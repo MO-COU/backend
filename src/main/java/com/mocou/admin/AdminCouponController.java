@@ -106,4 +106,24 @@ public class AdminCouponController {
             @PathVariable long couponId) {
         return ResponseEntity.ok(ApiResponse.success(service.getIssueResultCounts(couponId)));
     }
+
+    @GetMapping("/{couponId}/notification-counts")
+    @Tag(name = "Notification", description = "관리자 알림 처리 현황 조회 API")
+    @Operation(
+            summary = "알림 처리 현황 조회",
+            description = "회차별 발급 성공 알림의 전체·완료·대기·실패 건수를 조회합니다.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200", description = "알림 처리 현황 조회 성공"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400", description = "쿠폰 ID가 양수가 아님 (INVALID_INPUT)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404", description = "쿠폰이 존재하지 않음 (COUPON_NOT_FOUND)")
+    })
+    public ResponseEntity<ApiResponse<AdminCouponNotificationCounts>> getNotificationCounts(
+            @Parameter(description = "쿠폰 회차 ID", example = "301")
+                    @PathVariable
+                    long couponId) {
+        return ResponseEntity.ok(ApiResponse.success(service.getNotificationCounts(couponId)));
+    }
 }

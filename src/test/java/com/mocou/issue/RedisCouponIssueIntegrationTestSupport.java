@@ -94,6 +94,10 @@ abstract class RedisCouponIssueIntegrationTestSupport {
         return CouponRedisKey.issueResultCounts(COUPON_ID);
     }
 
+    protected String issueSequenceKey() {
+        return CouponRedisKey.issueSequence(COUPON_ID);
+    }
+
     protected long issueResultCount(String result) {
         Object value = redisTemplate.opsForHash().get(
                 issueResultCountsKey(),
@@ -116,6 +120,23 @@ abstract class RedisCouponIssueIntegrationTestSupport {
 
     protected String issuedMembersKey() {
         return CouponRedisKey.issuedMembers(COUPON_ID);
+    }
+
+    protected Double issuedMemberScore(long memberId) {
+        return redisTemplate.opsForZSet().score(
+                issuedMembersKey(),
+                Long.toString(memberId));
+    }
+
+    protected Long issuedMemberCount() {
+        return redisTemplate.opsForZSet().size(issuedMembersKey());
+    }
+
+    protected void addIssuedMember(long memberId, double issueSequence) {
+        redisTemplate.opsForZSet().add(
+                issuedMembersKey(),
+                Long.toString(memberId),
+                issueSequence);
     }
 
     protected String metadataKey() {

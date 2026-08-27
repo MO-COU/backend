@@ -1,8 +1,5 @@
 package com.mocou.global.exception;
 
-import java.util.Arrays;
-import java.util.stream.Collectors;
-
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -14,6 +11,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import com.mocou.global.response.ApiResponse;
+import com.mocou.global.logging.SafeExceptionLog;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -71,7 +69,7 @@ public class GlobalExceptionHandler {
                 "[RedisConnectionFailure] type={}, causeType={}\n{}",
                 exception.getClass().getName(),
                 cause.getClass().getName(),
-                stackFrames(cause));
+                SafeExceptionLog.stackFrames(cause));
 
         return ResponseEntity.status(ErrorCode.SERVICE_UNAVAILABLE.getStatus())
                 .body(ApiResponse.error(ErrorCode.SERVICE_UNAVAILABLE));
@@ -87,14 +85,12 @@ public class GlobalExceptionHandler {
     // 원인 추적은 예외 타입 + 발생 위치(스택 프레임) + traceId(MDC, 로그에 자동 포함)만으로 한다.
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception exception) {
-        log.error("[UnhandledException] type={}\n{}", exception.getClass().getName(), stackFrames(exception));
+        log.error(
+                "[UnhandledException] errorTypes={}\n{}",
+                SafeExceptionLog.typeChain(exception),
+                SafeExceptionLog.stackFrames(exception));
         return ResponseEntity.status(ErrorCode.SYSTEM_ERROR.getStatus())
                 .body(ApiResponse.error(ErrorCode.SYSTEM_ERROR));
     }
 
-    private static String stackFrames(Throwable exception) {
-        return Arrays.stream(exception.getStackTrace())
-                .map(frame -> "\tat " + frame)
-                .collect(Collectors.joining("\n"));
-    }
 }

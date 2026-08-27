@@ -49,6 +49,9 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
     /** 컨슈머가 실제로 만드는 그룹 이름. 값을 옮겨 적으면 규칙과 어긋나도 이 테스트가 통과해버린다. */
     private static final String SYNC_GROUP = RedisCouponIssueSyncGateway.GROUP_NAME;
 
+    /** DLQ 복구 컨슈머가 실제로 만드는 그룹 이름. 이유는 위와 같다. */
+    private static final String DLQ_SYNC_GROUP = RedisCouponIssueSyncGateway.DLQ_GROUP_NAME;
+
     private static final GenericContainer<?> REDIS =
             new GenericContainer<>(DockerImageName.parse("redis:8.8-alpine"))
                     .withExposedPorts(REDIS_PORT);
@@ -87,7 +90,8 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
                 TOTAL_QUANTITY - 2,
                 COUPON_ID);
 
-        redisTemplate.opsForSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "1", "2");
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "1", 1);
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "2", 2);
         redisTemplate.opsForValue().set(CouponRedisKey.stock(COUPON_ID), String.valueOf(TOTAL_QUANTITY - 2));
     }
 
@@ -118,7 +122,7 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
     @DisplayName("Redis에만 있는 발급자를 검출한다")
     void detectsMemberOnlyInRedis() {
         // given
-        redisTemplate.opsForSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "3");
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "3", 3);
 
         // when
         RuleOutcome outcome = outcome();
@@ -241,6 +245,56 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
         assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
         assertThat(outcome.violationCount()).isZero();
         assertThat(outcome.failureReason()).contains("처리 중이다");
+    }
+
+    /**
+     * 메인 스트림이 비었어도 DLQ에서 아직 복구를 시도하는 중일 수 있다. 이 상태를 놓치면
+     * Redis(issuedMembers)엔 있는데 DB(coupon_issue)엔 아직 없는 정상적인 지연을
+     * "유실"(ISSUED_ONLY_IN_REDIS)로 오판한다.
+     */
+    @Test
+    @DisplayName("DLQ에서 아직 복구를 시도하는 발급 이벤트가 남아 있으면 판정하지 않는다")
+    void refusesToJudgeWhileDlqEventsArePending() {
+        // given - DLQ로 넘어갔지만 아직 복구되지 않은 이벤트. 메인 스트림은 정상적으로 비어 있다.
+        redisTemplate
+                .opsForStream()
+                .add(CouponRedisKey.issueDlqStream(COUPON_ID), Map.of("memberId", "3"));
+
+        // when
+        RuleOutcome outcome = outcome();
+
+        // then
+        assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
+        assertThat(outcome.violationCount()).isZero();
+        assertThat(outcome.failureReason()).contains("DLQ");
+    }
+
+    /** {@code XLEN}과 별개로 DLQ의 {@code XPENDING}도 봐야 하는 이유는 메인 스트림과 동일하다. */
+    @Test
+    @DisplayName("DLQ 스트림은 비었지만 미확인 건이 남아 있으면 판정하지 않는다")
+    void refusesToJudgeWhileDlqEntriesAreUnacknowledged() {
+        // given - DLQ 복구 컨슈머가 이벤트를 그룹으로 읽고 XACK 없이 엔트리만 지운다
+        String dlqStreamKey = CouponRedisKey.issueDlqStream(COUPON_ID);
+        RecordId recordId =
+                redisTemplate.opsForStream().add(dlqStreamKey, Map.of("memberId", "3"));
+        redisTemplate.opsForStream().createGroup(dlqStreamKey, ReadOffset.from("0"), DLQ_SYNC_GROUP);
+        redisTemplate
+                .opsForStream()
+                .read(
+                        Consumer.from(DLQ_SYNC_GROUP, "test-recovery-consumer"),
+                        StreamOffset.create(dlqStreamKey, ReadOffset.lastConsumed()));
+        redisTemplate.opsForStream().delete(dlqStreamKey, recordId);
+
+        // 스트림 길이로는 남은 것이 없어 보인다
+        assertThat(redisTemplate.opsForStream().size(dlqStreamKey)).isZero();
+
+        // when
+        RuleOutcome outcome = outcome();
+
+        // then
+        assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
+        assertThat(outcome.violationCount()).isZero();
+        assertThat(outcome.failureReason()).contains("DLQ");
     }
 
     @Test

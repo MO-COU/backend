@@ -28,12 +28,7 @@ public class CouponIssueReservationService {
         validateIds(couponId, memberId);
 
         UUID eventId = UUID.randomUUID();
-
-        CouponReservationResult reservationResult =
-                redisCouponIssueGateway.reserveAndAppendEvent(
-                        couponId,
-                        memberId,
-                        eventId);
+        CouponReservationResult reservationResult = redisCouponIssueGateway.reserveAndAppendEvent(couponId, memberId, eventId);
 
         return switch (reservationResult) {
             case RESERVED ->

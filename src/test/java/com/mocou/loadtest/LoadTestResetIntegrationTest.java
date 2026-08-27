@@ -106,8 +106,13 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
         redisTemplate.opsForValue()
                 .set(CouponRedisKey.stock(DEMO_COUPON_ID), String.valueOf(TOTAL_QUANTITY - ISSUED_IN_LOAD_TEST));
         redisTemplate.opsForHash().put(CouponRedisKey.metadata(DEMO_COUPON_ID), "openAtEpochSecond", "1");
-        redisTemplate.opsForSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "2", "3", "4");
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "2", 1);
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "3", 2);
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "4", 3);
         redisTemplate.opsForHash().putAll(CouponRedisKey.issueResultCounts(DEMO_COUPON_ID),Map.of("RESERVED", String.valueOf(ISSUED_IN_LOAD_TEST),"SOLD_OUT", "2"));
+        redisTemplate.opsForValue().set(
+                CouponRedisKey.issueSequence(DEMO_COUPON_ID),
+                String.valueOf(ISSUED_IN_LOAD_TEST));
     }
 
     @Test
@@ -188,6 +193,57 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
         assertThat(redisTemplate.opsForStream().size(streamKey)).isZero();
         assertThat(redisTemplate.opsForStream().groups(streamKey))
                 .anyMatch(group -> RedisCouponIssueSyncGateway.GROUP_NAME.equals(group.groupName()));
+    }
+
+    /**
+     * DLQ 스트림도 메인 스트림과 같은 이유로 지웠다가 그룹을 되살려야 한다 — 그래야
+     * 같은 couponId로 시작하는 다음 부하 테스트가 지난 회차의 DLQ 잔재를 물려받지 않는다.
+     */
+    @Test
+    @DisplayName("리셋 뒤 DLQ 스트림은 비워지고 복구 컨슈머 그룹은 다시 만들어진다")
+    void clearsDlqStreamAndRestoresDlqConsumerGroupAfterReset() {
+        // given - 지난 부하 테스트가 DLQ로 넘긴 이벤트가 남아 있는 상태를 재현
+        String dlqStreamKey = CouponRedisKey.issueDlqStream(DEMO_COUPON_ID);
+        redisTemplate.opsForStream().add(dlqStreamKey, Map.of("memberId", "5"));
+        redisTemplate
+                .opsForStream()
+                .createGroup(dlqStreamKey, ReadOffset.from("0"), RedisCouponIssueSyncGateway.DLQ_GROUP_NAME);
+
+        // when
+        resetService.reset(DEMO_COUPON_ID);
+
+        // then - 지난 회차의 유령 이벤트가 다음 부하 테스트로 넘어가면 안 된다
+        assertThat(redisTemplate.opsForStream().size(dlqStreamKey)).isZero();
+        assertThat(redisTemplate.opsForStream().groups(dlqStreamKey))
+                .anyMatch(group -> RedisCouponIssueSyncGateway.DLQ_GROUP_NAME.equals(group.groupName()));
+    }
+
+    /**
+     * DLQ에서 아직 복구를 시도하는 중인 발급도 "동기화 진행 중"이다 — 지금 리셋하면 복구가
+     * 성공했을 때 방금 지운 발급이 되살아난다.
+     */
+    @Test
+    @DisplayName("DLQ에서 재시도 중인 발급이 남아 있으면 거부한다")
+    void rejectsWhileDlqRecoveryIsInProgress() {
+        // given - DLQ 복구 컨슈머가 읽고 아직 XACK하지 않은 상황을 재현
+        String dlqStreamKey = CouponRedisKey.issueDlqStream(DEMO_COUPON_ID);
+        redisTemplate.opsForStream().add(dlqStreamKey, Map.of("memberId", "5"));
+        redisTemplate
+                .opsForStream()
+                .createGroup(dlqStreamKey, ReadOffset.from("0"), RedisCouponIssueSyncGateway.DLQ_GROUP_NAME);
+        redisTemplate
+                .opsForStream()
+                .read(
+                        Consumer.from(RedisCouponIssueSyncGateway.DLQ_GROUP_NAME, "test-recovery-consumer"),
+                        StreamOffset.create(dlqStreamKey, ReadOffset.lastConsumed()));
+
+        // when, then
+        assertThatThrownBy(() -> resetService.reset(DEMO_COUPON_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS);
+
+        assertThat(countIssues(DEMO_COUPON_ID)).isEqualTo(ISSUED_IN_LOAD_TEST);
     }
 
     /**
@@ -299,6 +355,26 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
                 redisTemplate.opsForHash().increment(counterKey, "RESERVED", 1);
 
         assertThat(firstCount).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("리셋 뒤 Redis 발급 순번과 발급 회원이 제거된다")
+    void clearsIssueSequenceAndIssuedMembers() {
+        // given
+        String sequenceKey =
+                CouponRedisKey.issueSequence(DEMO_COUPON_ID);
+        String issuedMembersKey =
+                CouponRedisKey.issuedMembers(DEMO_COUPON_ID);
+
+        assertThat(redisTemplate.hasKey(sequenceKey)).isTrue();
+        assertThat(redisTemplate.hasKey(issuedMembersKey)).isTrue();
+
+        // when
+        resetService.reset(DEMO_COUPON_ID);
+
+        // then
+        assertThat(redisTemplate.hasKey(sequenceKey)).isFalse();
+        assertThat(redisTemplate.hasKey(issuedMembersKey)).isFalse();
     }
 
     private long count(String sql) {
