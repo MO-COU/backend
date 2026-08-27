@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
 import com.mocou.global.exception.BusinessException;
@@ -13,6 +12,11 @@ import com.mocou.global.exception.ErrorCode;
 import com.mocou.support.MySqlContainerTest;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,6 +45,7 @@ class VerificationLauncherIntegrationTest extends MySqlContainerTest {
 
     @Autowired private VerificationLauncher launcher;
     @Autowired private NamedParameterJdbcTemplate namedJdbcTemplate;
+    @Autowired private ExecutorService verificationExecutor;
 
     @MockitoBean private ConsistencyVerifier verifier;
 
@@ -52,16 +57,46 @@ class VerificationLauncherIntegrationTest extends MySqlContainerTest {
         given(verifier.startRun(null)).willReturn(NEW_RUN_ID);
     }
 
+    /**
+     * 다음 테스트로 넘어가기 전에 넘긴 실행이 끝나기를 기다린다.
+     *
+     * <p>{@code launch}는 실행을 다른 스레드로 넘기고 즉시 반환하므로 <b>테스트가 끝나도 그 스레드는 아직 돌고 있을 수
+     * 있다.</b> 그대로 두면 다음 테스트에서 대역이 초기화된 뒤 앞 테스트의 호출이 도착해, 호출 횟수를 세는 검증이 환경에 따라
+     * 실패한다. 실제로 로컬은 통과하고 CI만 실패했다.
+     *
+     * <p>실행기가 스레드 하나짜리라 빈 작업을 넣고 그것이 끝나기를 기다리면 <b>앞의 작업이 모두 끝난 것</b>이 보장된다.
+     */
+    @AfterEach
+    void drainAfterEachTest() {
+        awaitHandedOffRun();
+    }
+
+    /**
+     * 넘긴 실행이 끝나기를 기다린다.
+     *
+     * <p>실행기가 스레드 하나짜리라 빈 작업을 넣고 그것이 끝나기를 기다리면 <b>앞의 작업이 모두 끝난 것</b>이 보장된다.
+     */
+    private void awaitHandedOffRun() {
+        try {
+            verificationExecutor.submit(() -> {}).get(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("실행기를 기다리다 중단됐다", e);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new IllegalStateException("넘긴 실행이 끝나지 않았다", e);
+        }
+    }
+
     @Test
     @DisplayName("진행 중인 검증이 없으면 시작하고 실행을 다른 스레드로 넘긴다")
     void startsAndHandsOffWhenNothingIsRunning() {
         // when
         long runId = launcher.launch(null);
 
-        // then
+        // then - 호출한 스레드가 아니라 별도 스레드에서 도므로 끝나기를 기다린 뒤 확인한다
         assertThat(runId).isEqualTo(NEW_RUN_ID);
-        // 호출한 스레드가 아니라 별도 스레드에서 도므로 도착할 때까지 기다린다
-        verify(verifier, timeout(2000)).runAndComplete(NEW_RUN_ID);
+        awaitHandedOffRun();
+        verify(verifier).runAndComplete(NEW_RUN_ID);
     }
 
     @Test
@@ -91,7 +126,8 @@ class VerificationLauncherIntegrationTest extends MySqlContainerTest {
 
         // then - 이것까지 진행 중으로 보면 그다음부터 검증을 아예 못 하게 된다
         assertThat(runId).isEqualTo(NEW_RUN_ID);
-        verify(verifier, timeout(2000)).runAndComplete(NEW_RUN_ID);
+        awaitHandedOffRun();
+        verify(verifier).runAndComplete(NEW_RUN_ID);
     }
 
     @Test

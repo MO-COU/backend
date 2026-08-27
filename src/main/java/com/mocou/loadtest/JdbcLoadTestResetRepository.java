@@ -10,8 +10,8 @@ import org.springframework.stereotype.Repository;
 @RequiredArgsConstructor
 class JdbcLoadTestResetRepository implements LoadTestResetRepository {
 
-    private static final String OPEN_COUPON_SQL =
-            "SELECT coupon_id FROM coupon WHERE status = 'OPEN' ORDER BY coupon_id";
+    private static final String COUPON_STATUS_SQL =
+            "SELECT status FROM coupon WHERE coupon_id = :couponId";
 
     /**
      * 이력에는 {@code coupon_id}가 없어 발급 테이블과 이어 붙여 조건을 건다. {@code DELETE h}가 붙인 것 중
@@ -59,8 +59,11 @@ class JdbcLoadTestResetRepository implements LoadTestResetRepository {
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     @Override
-    public List<Long> findOpenCouponIds() {
-        return jdbcTemplate.queryForList(OPEN_COUPON_SQL, Map.of(), Long.class);
+    public String findStatus(long couponId) {
+        List<String> found =
+                jdbcTemplate.queryForList(
+                        COUPON_STATUS_SQL, Map.of("couponId", couponId), String.class);
+        return found.isEmpty() ? null : found.get(0);
     }
 
     @Override

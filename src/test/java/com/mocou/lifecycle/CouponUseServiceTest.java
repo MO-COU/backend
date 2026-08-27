@@ -2,13 +2,16 @@ package com.mocou.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.BDDMockito.given;
 
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
+import com.mocou.notification.NotificationSender;
+import com.mocou.notification.NotificationType;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -16,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.context.ApplicationEventPublisher;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.InjectMocks;
@@ -32,7 +34,7 @@ class CouponUseServiceTest {
     private static final LocalDateTime USED_AT = LocalDateTime.of(2026, 8, 18, 15, 30);
 
     @Mock private CouponUseRepository repository;
-    @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private NotificationSender notificationSender;
     @InjectMocks private CouponUseService service;
 
     @Test
@@ -60,13 +62,7 @@ class CouponUseServiceTest {
         assertThat(result)
                 .isEqualTo(new CouponUseResult(ISSUE_ID, CouponIssueStatus.USED, USED_AT));
         verify(repository).saveUsedHistory(ISSUE_ID, IDEMPOTENCY_KEY);
-        verify(eventPublisher)
-                .publishEvent(
-                        argThat(
-                                (Object event) ->
-                                        event.equals(
-                                                new CouponUsedEvent(
-                                                        ISSUE_ID, COUPON_ID, MEMBER_ID))));
+        verify(notificationSender).notifyMember(NotificationType.USED, COUPON_ID, MEMBER_ID);
     }
 
     @Test
@@ -93,7 +89,7 @@ class CouponUseServiceTest {
         assertThat(result.usedAt()).isEqualTo(USED_AT);
         verify(repository, never()).markUsed(ISSUE_ID);
         verify(repository, never()).saveUsedHistory(ISSUE_ID, IDEMPOTENCY_KEY);
-        verify(eventPublisher, never()).publishEvent(argThat((Object event) -> true));
+        verify(notificationSender, never()).notifyMember(any(), anyLong(), anyLong());
     }
 
     @Test

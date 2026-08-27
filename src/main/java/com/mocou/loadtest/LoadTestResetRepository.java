@@ -1,7 +1,5 @@
 package com.mocou.loadtest;
 
-import java.util.List;
-
 /**
  * 부하 테스트가 남긴 것을 지우고 재고를 되돌린다.
  *
@@ -13,14 +11,11 @@ import java.util.List;
 public interface LoadTestResetRepository {
 
     /**
-     * 발급을 여는 쿠폰 목록.
+     * 쿠폰의 현재 상태. 없는 쿠폰이면 {@code null}.
      *
-     * <p>리셋 대상을 호출한 쪽이 지정하지 않고 여기서 찾는다. 파라미터로 받으면 지난 회차를 지정할 수 있게 되고,
-     * 그 회차에는 검증 대상인 발급 300만 건이 들어 있다.
-     *
-     * <p>몇 개여야 하는지는 판단하지 않는다. 목록을 그대로 주고 서비스가 정한다.
+     * <p>되돌려도 되는 대상인지는 판단하지 않는다. 상태만 주고 서비스가 정한다.
      */
-    List<Long> findOpenCouponIds();
+    String findStatus(long couponId);
 
     /**
      * 상태 이력을 지운다.

@@ -13,12 +13,28 @@ public class AdminCouponService {
 
     private final AdminCouponRepository repository;
     private final AdminCouponRealtimeStockRepository realtimeStockRepository;
+    private final RedisAdminCouponIssueResultRepository issueResultRepository;
 
     public AdminCouponService(
             AdminCouponRepository repository,
-            AdminCouponRealtimeStockRepository realtimeStockRepository) {
+            AdminCouponRealtimeStockRepository realtimeStockRepository,
+            RedisAdminCouponIssueResultRepository issueResultRepository) {
         this.repository = repository;
         this.realtimeStockRepository = realtimeStockRepository;
+        this.issueResultRepository = issueResultRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public List<AdminCouponSummary> getCoupons() {
+        return repository.findAllSummaries();
+    }
+
+    @Transactional(readOnly = true)
+    public AdminCouponIssueResultCounts getIssueResultCounts(long couponId) {
+        validateCouponId(couponId);
+        validateCouponExists(couponId);
+        AdminCouponIssueResultCounts counts = issueResultRepository.findCounts(couponId);
+        return counts.withPersistenceProgress(repository.countIssues(couponId));
     }
 
     @Transactional(readOnly = true)

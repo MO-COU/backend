@@ -104,6 +104,36 @@ class AdminCouponControllerTest {
     }
 
     @Test
+    @DisplayName("Redis 발급 결과 집계를 공통 응답 형식으로 반환한다")
+    void returnsIssueResultCounts() throws Exception {
+        // given
+        given(service.getIssueResultCounts(COUPON_ID))
+                .willReturn(
+                        AdminCouponIssueResultCounts.of(
+                                        COUPON_ID, 8_320, 1_200, 420, 30, 30, 0, 0, 20)
+                                .withPersistenceProgress(7_980));
+
+        // when, then
+        mockMvc.perform(
+                        get(
+                                "/api/admin/coupons/{couponId}/issue-result-counts",
+                                COUPON_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.couponId").value(COUPON_ID))
+                .andExpect(jsonPath("$.data.totalRequests").value(10_000))
+                .andExpect(jsonPath("$.data.reserved").value(8_320))
+                .andExpect(jsonPath("$.data.failed").value(1_680))
+                .andExpect(jsonPath("$.data.soldOut").value(1_200))
+                .andExpect(jsonPath("$.data.duplicateIssue").value(420))
+                .andExpect(jsonPath("$.data.notOpenYet").value(30))
+                .andExpect(jsonPath("$.data.issueClosed").value(30))
+                .andExpect(jsonPath("$.data.dbPersisted").value(7_980))
+                .andExpect(jsonPath("$.data.pendingOrRetrying").value(320))
+                .andExpect(jsonPath("$.data.compensated").value(20));
+    }
+
+    @Test
     @DisplayName("존재하지 않는 쿠폰은 공통 404 응답을 반환한다")
     void returnsNotFoundForMissingCoupon() throws Exception {
         given(service.getStock(COUPON_ID))
