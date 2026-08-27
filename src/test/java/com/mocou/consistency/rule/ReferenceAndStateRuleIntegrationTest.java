@@ -129,6 +129,189 @@ class ReferenceAndStateRuleIntegrationTest extends MySqlContainerTest {
                         });
     }
 
+    /**
+     * 회원이 사라진 발급 건이다. 회원 정리 배치나 복원 스크립트가 발급을 남긴 채 회원만 지우면 생긴다.
+     *
+     * <p>위반은 <b>사라진 회원 하나</b>로 묶인다. 그 회원을 가리키던 발급이 몇 건이든 원인은 하나이기 때문이다.
+     */
+    @Test
+    @DisplayName("없는 회원을 가리키는 발급 건을 검출한다")
+    void detectsOrphanMemberReference() {
+        // given - FK를 끄고 없는 회원(999)에게 발급 2건을 넣는다
+        withoutForeignKeyChecks(
+                () -> {
+                    insertIssue(921, 1, 999, "ISSUED", BASE_TIME.minusDays(1), null, NEVER_EXPIRES);
+                    insertIssue(922, 1, 998, "ISSUED", BASE_TIME.minusDays(1), null, NEVER_EXPIRES);
+                });
+
+        // when
+        RuleOutcome outcome = outcome(VerificationRule.ORPHAN_REFERENCE);
+
+        // then - 사라진 회원이 둘이므로 위반도 2건이다
+        assertThat(outcome.violationCount()).isEqualTo(2);
+        assertThat(outcome.violations())
+                .allSatisfy(
+                        violation -> {
+                            assertThat(violation.targetType()).isEqualTo(ViolationTarget.MEMBER);
+                            assertThat(violation.detail()).contains("coupon_issue.member_id");
+                        });
+    }
+
+    /**
+     * 발급이 사라진 이력이다. 발급을 지우면서 이력을 함께 지우지 않으면 남는다.
+     *
+     * <p>정합성 검증이 이력을 근거로 삼으므로, 이것이 남아 있으면 <b>없는 발급의 상태 전이를 사실로 읽게 된다.</b>
+     */
+    @Test
+    @DisplayName("없는 발급을 가리키는 이력을 검출한다")
+    void detectsOrphanHistoryReference() {
+        // given
+        withoutForeignKeyChecks(() -> insertHistory(999, "UNISSUED", "ISSUED"));
+
+        // when
+        RuleOutcome outcome = outcome(VerificationRule.ORPHAN_REFERENCE);
+
+        // then
+        assertThat(outcome.violationCount()).isEqualTo(1);
+        assertThat(outcome.violations())
+                .singleElement()
+                .satisfies(
+                        violation -> {
+                            assertThat(violation.targetType()).isEqualTo(ViolationTarget.COUPON_ISSUE);
+                            assertThat(violation.targetId()).isEqualTo(999);
+                            assertThat(violation.detail())
+                                    .contains("coupon_issue_history.coupon_issue_id");
+                        });
+    }
+
+    /**
+     * 쿠폰이 사라진 재고다. 재고만 남으면 <b>아무도 발급받을 수 없는 재고</b>가 장부에 잡힌다.
+     *
+     * <p>재고 정합성 규칙({@code STOCK_MISMATCH})은 재고 행을 기준으로 세므로, 이런 행이 있으면 그 규칙의
+     * 검사 대상 수도 함께 어긋난다.
+     */
+    @Test
+    @DisplayName("없는 쿠폰을 가리키는 재고를 검출한다")
+    void detectsOrphanStockReference() {
+        // given
+        withoutForeignKeyChecks(
+                () ->
+                        jdbcTemplate.update(
+                                "INSERT INTO coupon_stock (coupon_id, total_quantity, remaining_quantity)"
+                                        + " VALUES (999, 10, 10)"));
+
+        // when
+        RuleOutcome outcome = outcome(VerificationRule.ORPHAN_REFERENCE);
+
+        // then
+        assertThat(outcome.violationCount()).isEqualTo(1);
+        assertThat(outcome.violations())
+                .singleElement()
+                .satisfies(
+                        violation -> {
+                            assertThat(violation.targetType()).isEqualTo(ViolationTarget.COUPON);
+                            assertThat(violation.targetId()).isEqualTo(999);
+                            assertThat(violation.detail()).contains("coupon_stock.coupon_id");
+                        });
+    }
+
+    /**
+     * 사용을 취소하면서 {@code used_at}을 지우지 않은 흔적이다. 상태만 되돌리고 시각을 남겨두면 "언제 썼는지"가 남아
+     * 이력과 어긋난다.
+     */
+    @Test
+    @DisplayName("사용 상태가 아닌데 사용 시각이 있으면 검출한다")
+    void detectsUnusedWithTimestamp() {
+        // given - 1건 주입. 이 규칙은 행 단위로 세므로 검출도 1건이다
+        insertIssue(911, 1, 2, "ISSUED", BASE_TIME.minusDays(2), BASE_TIME.minusDays(1), NEVER_EXPIRES);
+
+        // when
+        RuleOutcome outcome = outcome(VerificationRule.STATE_TIMESTAMP_MISMATCH);
+
+        // then
+        assertThat(outcome.violationCount()).isEqualTo(1);
+        assertThat(outcome.violations())
+                .singleElement()
+                .satisfies(
+                        violation -> {
+                            assertThat(violation.targetId()).isEqualTo(911);
+                            assertThat(violation.detail()).contains("UNUSED_WITH_TIMESTAMP");
+                        });
+    }
+
+    /** 받기 전에 쓴 쿠폰이다. 발급과 사용이 서로 다른 경로로 적재되면 순서가 뒤집힐 수 있다. */
+    @Test
+    @DisplayName("사용 시각이 발급 시각보다 이르면 검출한다")
+    void detectsUsedBeforeIssued() {
+        // given
+        insertIssue(912, 1, 3, "USED", BASE_TIME.minusDays(2), BASE_TIME.minusDays(3), NEVER_EXPIRES);
+
+        // when
+        RuleOutcome outcome = outcome(VerificationRule.STATE_TIMESTAMP_MISMATCH);
+
+        // then
+        assertThat(outcome.violationCount()).isEqualTo(1);
+        assertThat(outcome.violations())
+                .singleElement()
+                .satisfies(
+                        violation -> {
+                            assertThat(violation.targetId()).isEqualTo(912);
+                            assertThat(violation.detail()).contains("USED_BEFORE_ISSUED");
+                        });
+    }
+
+    /**
+     * 미래에 발급된 쿠폰이다.
+     *
+     * <p>판정 기준은 실제 현재 시각이 아니라 <b>검증 스냅샷 시각({@code T})</b>이다. 테스트의
+     * {@code BASE_TIME}을 그 값으로 넘기고 있으므로, 그보다 뒤로 넣으면 실행하는 날짜와 무관하게 위반이 된다.
+     */
+    @Test
+    @DisplayName("발급 시각이 기준 시각보다 뒤면 검출한다")
+    void detectsFutureIssue() {
+        // given
+        insertIssue(913, 1, 4, "ISSUED", BASE_TIME.plusDays(1), null, NEVER_EXPIRES);
+
+        // when
+        RuleOutcome outcome = outcome(VerificationRule.STATE_TIMESTAMP_MISMATCH);
+
+        // then
+        assertThat(outcome.violationCount()).isEqualTo(1);
+        assertThat(outcome.violations())
+                .singleElement()
+                .satisfies(
+                        violation -> {
+                            assertThat(violation.targetId()).isEqualTo(913);
+                            assertThat(violation.detail()).contains("FUTURE_ISSUE");
+                        });
+    }
+
+    /**
+     * 기간이 남았는데 만료된 건이다.
+     *
+     * <p>만료가 밀리는 것({@code EXPIRY_OVERDUE})은 배치 지연으로 설명되지만 <b>이르게 만료되는 것은 설명할 수
+     * 없다.</b> 그래서 유예를 주지 않고 {@code expires_at > T}이면 곧바로 위반으로 본다.
+     */
+    @Test
+    @DisplayName("만료 시각이 남았는데 만료 상태면 검출한다")
+    void detectsPrematureExpiry() {
+        // given
+        insertIssue(914, 1, 5, "EXPIRED", BASE_TIME.minusDays(2), null, BASE_TIME.plusDays(7));
+
+        // when
+        RuleOutcome outcome = outcome(VerificationRule.STATE_TIMESTAMP_MISMATCH);
+
+        // then
+        assertThat(outcome.violationCount()).isEqualTo(1);
+        assertThat(outcome.violations())
+                .singleElement()
+                .satisfies(
+                        violation -> {
+                            assertThat(violation.targetId()).isEqualTo(914);
+                            assertThat(violation.detail()).contains("PREMATURE_EXPIRY");
+                        });
+    }
+
     @Test
     @DisplayName("사용 상태인데 사용 시각이 없으면 검출한다")
     void detectsUsedWithoutTimestamp() {
@@ -239,6 +422,19 @@ class ReferenceAndStateRuleIntegrationTest extends MySqlContainerTest {
      * <p>{@code FOREIGN_KEY_CHECKS}는 세션 변수이고 JdbcTemplate이 매번 풀에서 커넥션을 빌리므로, 하나의 커넥션 안에서
      * 끄고 넣고 되돌린다.
      */
+    /** 발급 없이 이력만 넣는다. 고아 이력을 만들려면 FK를 끈 채 불러야 한다. */
+    private void insertHistory(long issueId, String fromStatus, String toStatus) {
+        jdbcTemplate.update(
+                "INSERT INTO coupon_issue_history"
+                        + " (coupon_issue_id, from_status, to_status, changed_at, idempotency_key)"
+                        + " VALUES (?, ?, ?, ?, ?)",
+                issueId,
+                fromStatus,
+                toStatus,
+                Timestamp.valueOf(BASE_TIME.minusDays(1)),
+                "orphan-%d".formatted(issueId));
+    }
+
     private void withoutForeignKeyChecks(Runnable work) {
         jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 0");
         try {

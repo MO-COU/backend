@@ -390,15 +390,26 @@ WHERE c.coupon_id IS NULL
 
 `R1`·`R3`은 구조상 위반이 나올 수 없어, 0건 반환만으로는 아무것도 증명하지 못한다. 검출 능력을 먼저 보여야 "불일치 0건"이 주장으로 성립한다.
 
+**이 규칙에는 구현체가 없다.** 위반을 주입하면 검증 대상이 오염되어 운영에서는 돌릴 수 없고, 만들어도 전량 검증에서 늘 건너뛰는 항목이 된다. 그래서 `verification_rule_result`에 기록되지 않는다.
+
+대신 **규칙별 통합 테스트가 각 판정 항목마다 위반을 주입하고 검출을 확인한다.** 검증이 "불일치 0건"을 내놓을 때, 그것을 뒷받침하는 근거가 이 테스트들이다.
+
 | 항목 | 값 |
 | --- | --- |
 | 실행 환경 | Testcontainers 등 격리된 DB **전용** |
-| 시나리오 | 규칙별 최소 1개, 주입 건수를 미리 정함 |
-| 통과 조건 | 검출 건수 = 주입 건수 |
-| `checked_count` | 시나리오 수 |
-| `violation_count` | 검출에 실패한 시나리오 수 |
+| 시나리오 | 규칙의 판정 항목마다 1개 이상 |
+| 확인하는 것 | 주입한 위반이 검출되는가, 그리고 **몇 건으로 세어지는가** |
 
 > **운영·로컬 공용 DB에서는 실행하지 않는다.** 위반 데이터를 실제로 INSERT하므로 검증 대상을 오염시킨다.
+
+**주입 수와 검출 수가 늘 같지는 않다.** 규칙마다 세는 단위가 다르기 때문이며, 시나리오마다 그 관계를 함께 확인한다.
+
+| 규칙 | 세는 단위 | 예 |
+| --- | --- | --- |
+| `R2` `OVER_ISSUE` | 쿠폰 | 2건을 초과 주입해도 위반은 쿠폰 1개 |
+| `R4` `STATE_TIMESTAMP_MISMATCH` | 행 | 한 행이 3항목을 어겨도 위반 1건 |
+| `R5` `HISTORY_MISMATCH` | 항목 | 한 발급이 2항목을 어기면 위반 2건 |
+| `R6` `ORPHAN_REFERENCE` | 사라진 값 | 한 값을 가리키는 자식이 3건이어도 위반 1건 |
 
 <details>
 <summary><b>DB 제약 우회 방법 — 규칙마다 다르다</b></summary>
@@ -409,7 +420,23 @@ WHERE c.coupon_id IS NULL
 | `R6` `ORPHAN_REFERENCE` | FK 제약 | `SET FOREIGN_KEY_CHECKS = 0` 후 INSERT |
 | `R2`·`R3`·`R4`·`R5` | 없음 | 그대로 INSERT / UPDATE |
 
-`SET FOREIGN_KEY_CHECKS = 0`은 **FK만 우회하고 유니크 인덱스는 우회하지 못한다.**
+`SET FOREIGN_KEY_CHECKS = 0`은 **FK만 우회하고 유니크 인덱스는 우회하지 못한다.** 그리고 **세션 변수**라 같은 커넥션에서 실행해야 한다 — `JdbcTemplate`은 매번 풀에서 커넥션을 빌리므로 하나의 커넥션 안에서 처리하도록 감싸야 한다.
+
+**유니크 인덱스를 뺄 때는 순서가 있다.** 그냥 `DROP`하면 FK가 그 인덱스를 쓰고 있어 막힌다.
+
+```
+ERROR 1553: Cannot drop index 'uk_issue_coupon_member': needed in a foreign key constraint
+```
+
+선두 컬럼에 대체 인덱스를 **먼저** 만들어야 뺄 수 있고, 복원은 역순이다.
+
+```sql
+ALTER TABLE coupon_issue ADD INDEX idx_tmp_issue_coupon (coupon_id);
+ALTER TABLE coupon_issue DROP INDEX uk_issue_coupon_member;
+-- 주입
+ALTER TABLE coupon_issue ADD UNIQUE KEY uk_issue_coupon_member (coupon_id, member_id);
+ALTER TABLE coupon_issue DROP INDEX idx_tmp_issue_coupon;
+```
 
 </details>
 
@@ -492,7 +519,7 @@ Redis가 확정한 발급 결과와 DB 이력이 같은가.
 
 | 항목 | 내용 |
 | --- | --- |
-| 구조상 통과하는 규칙 | `R1`·`R3`은 현재 데이터에서 위반이 나올 수 없다. `R7`이 이를 보완한다 |
+| 구조상 통과하는 규칙 | `R1`·`R3`은 현재 데이터에서 위반이 나올 수 없다. 규칙별 통합 테스트가 위반을 주입해 검출력을 확인하는 것으로 보완한다(`R7`) |
 | 유예 시간 결합 | `G`는 만료 배치 주기(`fixed-delay-ms`)에서 파생한다. 검증기가 이 설정을 읽어야 하므로 B2 설정에 대한 의존이 생긴다. 배치 주기를 검증기가 알 수 없는 환경(별도 프로세스 실행 등)에서는 유예를 명시적으로 넘겨야 한다 |
 | 실행계획 미확인 | `EXPLAIN` 분석은 아직이다. `R5`의 `BROKEN_CHAIN`이 가장 무겁다 — 600만 행을 발급 건별로 정렬해야 해서 나머지 규칙을 전부 합친 것보다 오래 걸린다 |
 | `R8` 선행 조건 | 발급이 진행 중이면 `R8`은 판정 불가로 남고 전체 판정이 `ERROR`가 된다. 부하 테스트가 끝나 스트림이 비워진 뒤 실행해야 한다 |
