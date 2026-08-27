@@ -319,7 +319,7 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
         assertThat(redisTemplate.hasKey(issuedMembersKey)).isTrue();
 
         // when
-        resetService.reset();
+        resetService.reset(DEMO_COUPON_ID);
 
         // then
         assertThat(redisTemplate.hasKey(sequenceKey)).isFalse();
