@@ -32,8 +32,9 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
             """;
 
     private static final String INSERT_COUPON_ISSUE = """
-            INSERT INTO coupon_issue (coupon_id, member_id, status, issued_at, expires_at)
-            VALUES (:couponId, :memberId, 'ISSUED', :issuedAt, :expiresAt)
+            INSERT INTO coupon_issue (
+                coupon_id, member_id, issue_sequence, remaining_at_issue, status, issued_at, expires_at)
+            VALUES (:couponId, :memberId, :issueSequence, :remainingAtIssue, 'ISSUED', :issuedAt, :expiresAt)
             """;
 
     private static final String INSERT_COUPON_ISSUE_HISTORY = """
@@ -144,6 +145,8 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
             jdbcClient.sql(INSERT_COUPON_ISSUE)
                     .param("couponId", event.couponId())
                     .param("memberId", event.memberId())
+                    .param("issueSequence", event.issueSequence())
+                    .param("remainingAtIssue", event.remainingAtIssue())
                     .param("issuedAt", event.issuedAt())
                     .param("expiresAt", expiresAt)
                     .update(keyHolder);
