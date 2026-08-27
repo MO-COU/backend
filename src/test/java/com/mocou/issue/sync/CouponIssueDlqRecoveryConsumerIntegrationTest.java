@@ -1,5 +1,14 @@
 package com.mocou.issue.sync;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -19,15 +28,6 @@ import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 
 import com.mocou.global.exception.ErrorCode;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 
 /**
  * {@link CouponIssueSyncConsumer}가 재시도 한도를 넘겨 DLQ로 옮긴 이벤트를
@@ -111,7 +111,7 @@ class CouponIssueDlqRecoveryConsumerIntegrationTest
         // 원본 예약 상태(재고 차감 + 발급 회원 등록)를 재현해, 여기서 비로소
         // 보상되는지 끝까지 검증한다.
         setStock(5);
-        redisTemplate.opsForSet().add(issuedMembersKey(), "100");
+        redisTemplate.opsForZSet().add(issuedMembersKey(), "100", 1);
         gateway.ensureDlqConsumerGroup(COUPON_ID);
         addDlqEvent("event-1", 100L, 1L);
         RecordId recordId = redisTemplate.<String, String>opsForStream().read(
@@ -136,7 +136,7 @@ class CouponIssueDlqRecoveryConsumerIntegrationTest
         verify(repository, never()).saveBatch(anyLong(), anyList());
         verify(repository).recordFailure(eq(COUPON_ID), eq(100L), eq(ErrorCode.INTERNAL_ERROR), any());
         assertThat(currentStock()).isEqualTo("6");
-        assertThat(redisTemplate.opsForSet().isMember(issuedMembersKey(), "100")).isFalse();
+        assertThat(redisTemplate.opsForZSet().score(issuedMembersKey(), "100")).isNull();
         assertThat(dlqPendingCount()).isZero();
         assertThat(redisTemplate.opsForStream().size(dlqStreamKey())).isZero();
     }
