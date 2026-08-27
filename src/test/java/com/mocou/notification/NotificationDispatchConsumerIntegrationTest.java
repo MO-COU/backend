@@ -1,5 +1,6 @@
 package com.mocou.notification;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -42,7 +44,7 @@ class NotificationDispatchConsumerIntegrationTest {
     @DisplayName("PENDING 알림을 발송에 성공하면 SENT로 표시한다")
     void marksSentOnSuccessfulDispatch() {
         // given
-        given(notificationRepository.findPending(anyBatchSize()))
+        given(notificationRepository.findPending(anyBatchSize(), any(LocalDateTime.class)))
                 .willReturn(List.of(pending(1L, 0)));
         NotificationDispatchConsumer consumer = consumer(properties(5));
 
@@ -61,7 +63,7 @@ class NotificationDispatchConsumerIntegrationTest {
     @DisplayName("여러 건이 한 번에 성공하면 markSentBatch를 한 번만 묶어서 호출한다")
     void marksMultipleSuccessesInOneBatchCall() {
         // given
-        given(notificationRepository.findPending(anyBatchSize()))
+        given(notificationRepository.findPending(anyBatchSize(), any(LocalDateTime.class)))
                 .willReturn(List.of(pending(1L, 0), pending(2L, 0)));
         NotificationDispatchConsumer consumer = consumer(properties(5));
 
@@ -75,11 +77,35 @@ class NotificationDispatchConsumerIntegrationTest {
                         any(LocalDateTime.class));
     }
 
+    // outbox: 즉시 경로와의 중복 발송을 막는 핵심 조건 - 폴링은 minDispatchAgeSeconds보다
+    // 최근에 생성된 row를 절대 조회 대상에 포함하면 안 된다.
+    @Test
+    @DisplayName("폴링은 설정된 최소 대기시간만큼 지난 생성 시각을 기준으로 조회한다")
+    void findsPendingOnlyOlderThanMinDispatchAge() {
+        // given
+        NotificationDispatchProperties properties = properties(5);
+        properties.setMinDispatchAgeSeconds(7);
+        given(notificationRepository.findPending(anyBatchSize(), any(LocalDateTime.class)))
+                .willReturn(List.of());
+        NotificationDispatchConsumer consumer = consumer(properties);
+        LocalDateTime before = LocalDateTime.now().minusSeconds(7);
+
+        // when
+        consumer.dispatch();
+
+        // then
+        ArgumentCaptor<LocalDateTime> captor = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(notificationRepository).findPending(eq(properties.getBatchSize()), captor.capture());
+        LocalDateTime after = LocalDateTime.now().minusSeconds(7);
+        assertThat(captor.getValue()).isBetween(before, after);
+    }
+
     @Test
     @DisplayName("대기 중인 알림이 없으면 아무 것도 하지 않는다")
     void doesNothingWhenNothingPending() {
         // given
-        given(notificationRepository.findPending(anyBatchSize())).willReturn(List.of());
+        given(notificationRepository.findPending(anyBatchSize(), any(LocalDateTime.class)))
+                .willReturn(List.of());
         NotificationDispatchConsumer consumer = consumer(properties(5));
 
         // when
@@ -94,7 +120,7 @@ class NotificationDispatchConsumerIntegrationTest {
     void incrementsRetryCountOnRetryableFailure() {
         // given
         sendSucceeds = false;
-        given(notificationRepository.findPending(anyBatchSize()))
+        given(notificationRepository.findPending(anyBatchSize(), any(LocalDateTime.class)))
                 .willReturn(List.of(pending(1L, 1)));
         NotificationDispatchConsumer consumer = consumer(properties(5));
 
@@ -112,7 +138,7 @@ class NotificationDispatchConsumerIntegrationTest {
     void marksFailedWhenRetryLimitExceeded() {
         // given
         sendSucceeds = false;
-        given(notificationRepository.findPending(anyBatchSize()))
+        given(notificationRepository.findPending(anyBatchSize(), any(LocalDateTime.class)))
                 .willReturn(List.of(pending(1L, 3)));
         NotificationDispatchConsumer consumer = consumer(properties(3));
 

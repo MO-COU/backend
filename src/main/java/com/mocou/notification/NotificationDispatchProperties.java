@@ -27,6 +27,14 @@ public class NotificationDispatchProperties {
     @Min(1)
     private int maxDeliveryCount = 3;
 
+    // 이보다 최근에 생성된 PENDING row는 폴링(안전망 경로) 대상에서 제외한다. 즉시 경로가
+    // 커밋 직후 같은 row를 처리 중일 수 있는 시간대라, 폴링이 여기 끼어들면 같은 알림이
+    // 두 번 발송될 수 있다. 즉시 경로는 findPending을 거치지 않으므로 이 값에 영향받지
+    // 않는다 - 지금(로그만 남기는 모킹)은 배치 처리가 사실상 순간이라 여유값이지만, 실제
+    // 발송 연동으로 배치 처리 시간이 늘면 그보다 크게 잡아야 한다.
+    @Min(0)
+    private int minDispatchAgeSeconds = 5;
+
     public int getBatchSize() {
         return batchSize;
     }
@@ -41,5 +49,13 @@ public class NotificationDispatchProperties {
 
     public void setMaxDeliveryCount(int maxDeliveryCount) {
         this.maxDeliveryCount = maxDeliveryCount;
+    }
+
+    public int getMinDispatchAgeSeconds() {
+        return minDispatchAgeSeconds;
+    }
+
+    public void setMinDispatchAgeSeconds(int minDispatchAgeSeconds) {
+        this.minDispatchAgeSeconds = minDispatchAgeSeconds;
     }
 }

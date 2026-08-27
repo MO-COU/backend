@@ -24,8 +24,15 @@ public interface NotificationRepository {
      */
     Long save(NotificationRecord notification);
 
-    /** outbox: 아직 발송 안 된(PENDING) 알림을 오래된 순으로 가져온다. */
-    List<PendingNotification> findPending(int limit);
+    /**
+     * outbox: 아직 발송 안 된(PENDING) 알림을 오래된 순으로 가져온다.
+     *
+     * <p>{@code createdBefore} 이후에 생성된 row는 제외한다 - 커밋 직후 즉시 발송 경로가 방금
+     * 큐잉한 알림을 이 폴링이 같은 순간에 다시 집어 중복 발송하는 것을 막기 위함이다. 즉시
+     * 경로는 이 메서드를 거치지 않고 이미 아는 id로 바로 처리하므로, 폴링에서만 "충분히
+     * 오래된" 것만 보게 하면 두 경로가 절대 같은 row를 동시에 건드릴 수 없다.
+     */
+    List<PendingNotification> findPending(int limit, LocalDateTime createdBefore);
 
     /** 관리자 화면에 보여줄 회차별 발급 성공 알림 처리 상태를 집계한다. */
     NotificationStatusCounts countIssueSuccessByCouponId(long couponId);
