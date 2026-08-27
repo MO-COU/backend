@@ -26,6 +26,19 @@ class SystemErrorFileAppenderTest {
     Path logDirectory;
 
     @Test
+    @DisplayName("시스템 오류 archive 삭제는 백업 스크립트가 담당한다")
+    void doesNotConfigureLogbackArchiveDeletion() throws Exception {
+        // when
+        String configuration = Files.readString(Path.of("src/main/resources/logback-spring.xml"));
+
+        // then
+        assertThat(configuration)
+                .contains("<maxFileSize>10MB</maxFileSize>")
+                .doesNotContain("<maxHistory>")
+                .doesNotContain("<totalSizeCap>");
+    }
+
+    @Test
     @DisplayName("시스템 오류 파일에는 ERROR만 JSON 한 줄로 기록한다")
     void writesOnlyErrorEventsAsJsonLines() throws Exception {
         // given
