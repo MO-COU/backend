@@ -44,6 +44,16 @@ public class LoadTestDbSyncMonitor {
                                     state.streamSize(),
                                     state.pendingCount()));
         }
+        if (state.dbIssuedCount() > expectedIssuedCount) {
+            // k6가 응답을 못 받고 끊었지만 서버는 발급을 마친 건들. 초과 발급이 아니라 계측 차이다.
+            log.warn(
+                    "DB 적재 완료. k6가 세지 못한 발급이 있다: couponId={}, k6={}, db={}, 차이={}",
+                    couponId,
+                    expectedIssuedCount,
+                    state.dbIssuedCount(),
+                    state.dbIssuedCount() - expectedIssuedCount);
+            return;
+        }
         log.info(
                 "DB 적재 완료: couponId={}, issuedCount={}", couponId, expectedIssuedCount);
     }
@@ -77,8 +87,14 @@ public class LoadTestDbSyncMonitor {
 
     private record SyncState(long dbIssuedCount, long streamSize, long pendingCount) {
 
+        /**
+         * k6가 센 성공 건수는 DB 건수의 하한이다. 클라이언트가 타임아웃으로 끊은 뒤에도 서버가 발급을
+         * 마치는 경우가 있어, 부하가 셀수록 db > expected가 정상적으로 발생한다. 같아질 때까지
+         * 기다리면 그런 회차는 영원히 완료로 넘어가지 못한다. 우리가 확인하려는 것은 "Redis에 남은
+         * 예약이 DB까지 다 내려갔는가"이므로 스트림과 pending이 비었는지가 실제 판정 기준이다.
+         */
         private boolean isComplete(int expectedIssuedCount) {
-            return dbIssuedCount == expectedIssuedCount && streamSize == 0 && pendingCount == 0;
+            return dbIssuedCount >= expectedIssuedCount && streamSize == 0 && pendingCount == 0;
         }
     }
 }
