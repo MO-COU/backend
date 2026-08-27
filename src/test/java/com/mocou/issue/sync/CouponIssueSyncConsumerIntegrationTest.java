@@ -1,5 +1,16 @@
 package com.mocou.issue.sync;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -22,17 +33,6 @@ import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 
 import com.mocou.global.exception.ErrorCode;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 
 /**
  * DB 저장({@link CouponIssueSyncRepository})은 mock으로 대체해서, Redis
@@ -165,7 +165,7 @@ class CouponIssueSyncConsumerIntegrationTest
         // reserveAndAppendEvent가 실제로 남기는 상태(재고 차감 + 발급 회원 등록)를
         // 직접 재현해서, 이번엔 이 상태가 "그대로 유지"되는지(보상하지 않는지) 검증한다.
         setStock(5);
-        redisTemplate.opsForSet().add(issuedMembersKey(), "100");
+        redisTemplate.opsForZSet().add(issuedMembersKey(), "100", 1);
         addEvent("event-1", 100L, 1L);
         RecordId recordId = redisTemplate.<String, String>opsForStream().read(
                         Consumer.from(RedisCouponIssueSyncGateway.GROUP_NAME, "crashed-worker"),
@@ -198,7 +198,7 @@ class CouponIssueSyncConsumerIntegrationTest
         // 회원의 Redis 예약을 그대로 유지한다 — DLQ 복구가 나중에 실제로 발급을
         // 완성시킬 수 있어야 하므로 여기서 보상(재고 원복)하지 않는다.
         assertThat(currentStock()).isEqualTo("5");
-        assertThat(redisTemplate.opsForSet().isMember(issuedMembersKey(), "100")).isTrue();
+        assertThat(redisTemplate.opsForZSet().score(issuedMembersKey(), "100")).isEqualTo(1.0);
         // 원본 스트림에서는 XACK+XDEL로 완전히 제거된다.
         assertThat(pendingCount()).isZero();
         assertThat(redisTemplate.opsForStream().size(issueStreamKey())).isZero();

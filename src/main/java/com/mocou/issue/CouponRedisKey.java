@@ -39,8 +39,15 @@ public final class CouponRedisKey {
     }
 
     /**
+     * Redis Lua 예약 성공 순번을 생성하는 Counter Key.
+     */
+    public static String issueSequence(long couponId) {
+        validateCouponId(couponId);
+        return "coupon:{%d}:issue-sequence".formatted(couponId);
+    }
+
+    /**
      * 발급 동기화 재시도 한도를 넘긴 이벤트를 보관하는 DLQ Stream Key.
-     * 원본 {@link #issueStream(long)}과 같은 필드 구조를 그대로 옮겨 담는다.
      */
     public static String issueDlqStream(long couponId) {
         validateCouponId(couponId);

@@ -1,11 +1,12 @@
 package com.mocou.loadtest;
 
-import com.mocou.global.exception.BusinessException;
-import com.mocou.global.exception.ErrorCode;
-import com.mocou.issue.CouponRedisKey;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+
+import com.mocou.global.exception.BusinessException;
+import com.mocou.global.exception.ErrorCode;
+import com.mocou.issue.CouponRedisKey;
 
 /** 실행 전 Redis 상태 확인함. */
 @Component
@@ -42,7 +43,7 @@ public class LoadTestRedisReadinessValidator {
             throw notReady("Redis 쿠폰 발급 시간 정보가 올바르지 않습니다");
         }
 
-        Long issuedMembers = redisTemplate.opsForSet().size(CouponRedisKey.issuedMembers(couponId));
+        Long issuedMembers = redisTemplate.opsForZSet().size(CouponRedisKey.issuedMembers(couponId));
         Long streamLength = redisTemplate.opsForStream().size(CouponRedisKey.issueStream(couponId));
         Long dlqStreamLength = redisTemplate.opsForStream().size(CouponRedisKey.issueDlqStream(couponId));
         Long resultCounts = redisTemplate.opsForHash().size(CouponRedisKey.issueResultCounts(couponId));

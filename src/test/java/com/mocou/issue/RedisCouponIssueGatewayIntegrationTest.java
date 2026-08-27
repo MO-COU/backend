@@ -23,10 +23,7 @@ public class RedisCouponIssueGatewayIntegrationTest
         assertThat(result)
                 .isEqualTo(CouponReservationResult.RESERVED);
         assertThat(currentStock()).isEqualTo("1");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isTrue();
+        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
     }
 
     @Test
@@ -45,8 +42,7 @@ public class RedisCouponIssueGatewayIntegrationTest
                 .isEqualTo(
                         CouponReservationResult.DUPLICATE_ISSUE);
         assertThat(currentStock()).isEqualTo("1");
-        assertThat(redisTemplate.opsForSet().size(
-                issuedMembersKey()))
+        assertThat(issuedMemberCount())
                 .isEqualTo(1L);
     }
 
@@ -61,10 +57,7 @@ public class RedisCouponIssueGatewayIntegrationTest
         assertThat(result)
                 .isEqualTo(CouponReservationResult.SOLD_OUT);
         assertThat(currentStock()).isEqualTo("0");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isFalse();
+        assertThat(issuedMemberScore(100L)).isNull();
     }
 
     @Test
@@ -95,10 +88,7 @@ public class RedisCouponIssueGatewayIntegrationTest
                         CouponReservationResult
                                 .METADATA_NOT_INITIALIZED);
         assertThat(currentStock()).isEqualTo("2");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isFalse();
+        assertThat(issuedMemberScore(100L)).isNull();
     }
 
     @Test
@@ -115,10 +105,7 @@ public class RedisCouponIssueGatewayIntegrationTest
         assertThat(result)
                 .isEqualTo(CouponReservationResult.NOT_OPEN_YET);
         assertThat(currentStock()).isEqualTo("2");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isFalse();
+        assertThat(issuedMemberScore(100L)).isNull();
     }
 
     @Test
@@ -133,10 +120,7 @@ public class RedisCouponIssueGatewayIntegrationTest
         assertThat(result)
                 .isEqualTo(CouponReservationResult.ISSUE_CLOSED);
         assertThat(currentStock()).isEqualTo("2");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isFalse();
+        assertThat(issuedMemberScore(100L)).isNull();
     }
 
     @Test
@@ -163,21 +147,43 @@ public class RedisCouponIssueGatewayIntegrationTest
                 .isEqualTo(CouponCompensationResult.NOT_NEEDED);
 
         assertThat(currentStock()).isEqualTo("2");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isFalse();
+        assertThat(issuedMemberScore(100L)).isNull();
 
         assertThat(issueResultCount("RESERVED"))
                 .isEqualTo(1L);
         assertThat(issueResultCount("COMPENSATED"))
                 .isEqualTo(1L);
+        assertThat(redisTemplate.opsForValue().get(issueSequenceKey()))
+                .isEqualTo("1");
 
         assertThat(
                 issueResultCount("RESERVED")
                         - issueResultCount("COMPENSATED"))
-                .isEqualTo(redisTemplate.opsForSet().size(
-                        issuedMembersKey()));
+                .isEqualTo(issuedMemberCount());
+    }
+
+    @Test
+    @DisplayName("보상된 발급 순번은 다음 예약에 재사용하지 않는다")
+    void doesNotReuseCompensatedIssueSequence() {
+        setStock(2);
+
+        gateway.reserveAndAppendEvent(
+                COUPON_ID,
+                100L,
+                UUID.randomUUID());
+        gateway.compensate(COUPON_ID, 100L);
+
+        CouponReservationResult next =
+                gateway.reserveAndAppendEvent(
+                        COUPON_ID,
+                        101L,
+                        UUID.randomUUID());
+
+        assertThat(next).isEqualTo(CouponReservationResult.RESERVED);
+        assertThat(issuedMemberScore(100L)).isNull();
+        assertThat(issuedMemberScore(101L)).isEqualTo(2.0);
+        assertThat(redisTemplate.opsForValue().get(issueSequenceKey()))
+                .isEqualTo("2");
     }
 
     @Test
@@ -197,9 +203,7 @@ public class RedisCouponIssueGatewayIntegrationTest
     void rejectsWrongCompensationCounterType() {
         setStock(1);
 
-        redisTemplate.opsForSet().add(
-                issuedMembersKey(),
-                "100");
+        addIssuedMember(100L, 1.0);
         redisTemplate.opsForValue().set(
                 issueResultCountsKey(),
                 "not-a-hash");
@@ -209,10 +213,7 @@ public class RedisCouponIssueGatewayIntegrationTest
                 .isInstanceOf(DataAccessException.class);
 
         assertThat(currentStock()).isEqualTo("1");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isTrue();
+        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
         assertThat(redisTemplate.opsForValue().get(
                 issueResultCountsKey()))
                 .isEqualTo("not-a-hash");
@@ -238,10 +239,7 @@ public class RedisCouponIssueGatewayIntegrationTest
                 .isInstanceOf(DataAccessException.class);
 
         assertThat(currentStock()).isEqualTo("1");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isTrue();
+        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
 
         assertThat(issueResultCount("RESERVED"))
                 .isEqualTo(1L);

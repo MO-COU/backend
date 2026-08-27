@@ -1,5 +1,5 @@
 -- KEYS[1]: coupon:{couponId}:stock
--- KEYS[2]: coupon:{couponId}:issued-members
+-- KEYS[2]: coupon:{couponId}:issued-members (Sorted Set)
 -- KEYS[3]: coupon:{couponId}:issue-result-counts
 -- ARGV[1]: memberId
 
@@ -18,17 +18,24 @@ if resultCountsType ~= 'none'
     )
 end
 
--- 회원이 실제로 예약된 상태일 때만 보상한다
-local removed = redis.call(
-    'SREM',
-    KEYS[2],
-    ARGV[1]
-)
+local issuedMembersType = redis.call('TYPE', KEYS[2]).ok
+
+if issuedMembersType ~= 'none'
+        and issuedMembersType ~= 'zset' then
+    return redis.error_reply(
+        'coupon issued members key must be a sorted set'
+    )
+end
+
+-- 원복 실패 시 같은 발급 순번으로 복구할 수 있도록 Score를 먼저 읽는다
+local issueSequence = redis.call('ZSCORE', KEYS[2], ARGV[1])
 
 -- 이미 보상됐거나 해당 회원의 예약이 없는 경우
-if removed == 0 then
+if not issueSequence then
     return 0
 end
+
+redis.call('ZREM', KEYS[2], ARGV[1])
 
 -- Redis 재고 복구
 local stockResult = redis.pcall(
@@ -39,11 +46,7 @@ local stockResult = redis.pcall(
 -- 재고 복구 실패 시 제거했던 회원을 다시 등록
 if type(stockResult) == 'table'
         and stockResult.err then
-    redis.call(
-        'SADD',
-        KEYS[2],
-        ARGV[1]
-    )
+    redis.call('ZADD', KEYS[2], issueSequence, ARGV[1])
 
     return redis.error_reply(stockResult.err)
 end
@@ -60,11 +63,7 @@ local countResult = redis.pcall(
 if type(countResult) == 'table'
         and countResult.err then
     redis.call('DECR', KEYS[1])
-    redis.call(
-        'SADD',
-        KEYS[2],
-        ARGV[1]
-    )
+    redis.call('ZADD', KEYS[2], issueSequence, ARGV[1])
 
     return redis.error_reply(countResult.err)
 end

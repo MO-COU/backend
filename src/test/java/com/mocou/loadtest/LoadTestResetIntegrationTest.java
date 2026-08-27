@@ -106,8 +106,13 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
         redisTemplate.opsForValue()
                 .set(CouponRedisKey.stock(DEMO_COUPON_ID), String.valueOf(TOTAL_QUANTITY - ISSUED_IN_LOAD_TEST));
         redisTemplate.opsForHash().put(CouponRedisKey.metadata(DEMO_COUPON_ID), "openAtEpochSecond", "1");
-        redisTemplate.opsForSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "2", "3", "4");
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "2", 1);
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "3", 2);
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(DEMO_COUPON_ID), "4", 3);
         redisTemplate.opsForHash().putAll(CouponRedisKey.issueResultCounts(DEMO_COUPON_ID),Map.of("RESERVED", String.valueOf(ISSUED_IN_LOAD_TEST),"SOLD_OUT", "2"));
+        redisTemplate.opsForValue().set(
+                CouponRedisKey.issueSequence(DEMO_COUPON_ID),
+                String.valueOf(ISSUED_IN_LOAD_TEST));
     }
 
     @Test
@@ -350,6 +355,26 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
                 redisTemplate.opsForHash().increment(counterKey, "RESERVED", 1);
 
         assertThat(firstCount).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("리셋 뒤 Redis 발급 순번과 발급 회원이 제거된다")
+    void clearsIssueSequenceAndIssuedMembers() {
+        // given
+        String sequenceKey =
+                CouponRedisKey.issueSequence(DEMO_COUPON_ID);
+        String issuedMembersKey =
+                CouponRedisKey.issuedMembers(DEMO_COUPON_ID);
+
+        assertThat(redisTemplate.hasKey(sequenceKey)).isTrue();
+        assertThat(redisTemplate.hasKey(issuedMembersKey)).isTrue();
+
+        // when
+        resetService.reset(DEMO_COUPON_ID);
+
+        // then
+        assertThat(redisTemplate.hasKey(sequenceKey)).isFalse();
+        assertThat(redisTemplate.hasKey(issuedMembersKey)).isFalse();
     }
 
     private long count(String sql) {

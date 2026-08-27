@@ -137,7 +137,8 @@ public class LoadTestResetService {
                         CouponRedisKey.issuedMembers(couponId),
                         CouponRedisKey.issueStream(couponId),
                         CouponRedisKey.issueDlqStream(couponId),
-                        CouponRedisKey.issueResultCounts(couponId)));
+                        CouponRedisKey.issueResultCounts(couponId),
+                        CouponRedisKey.issueSequence(couponId)));
     }
 
     /**
