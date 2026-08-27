@@ -44,6 +44,19 @@ public enum ErrorCode {
     LOAD_TEST_TARGET_NOT_UNIQUE(HttpStatus.CONFLICT, "되돌릴 대상 쿠폰을 특정할 수 없습니다"),
     // 컨슈머가 읽어간 발급은 리셋이 끝난 뒤 DB에 들어올 수 있다. 그러면 지운 발급이 되살아난다.
     LOAD_TEST_SYNC_IN_PROGRESS(HttpStatus.CONFLICT, "아직 DB로 반영되지 않은 발급이 남아 있습니다"),
+    // 종료된 회차에는 검증 대상인 더미데이터가 들어 있다. 되돌리면 복구할 방법이 재적재뿐이다.
+    LOAD_TEST_TARGET_CLOSED(HttpStatus.CONFLICT, "종료된 회차는 되돌릴 수 없습니다"),
+    LOAD_TEST_ALREADY_RUNNING(HttpStatus.CONFLICT, "이미 진행 중인 부하 테스트가 있습니다"),
+    LOAD_TEST_COUPON_NOT_READY(HttpStatus.CONFLICT, "부하 테스트를 실행할 수 없는 쿠폰 상태입니다"),
+    LOAD_TEST_RUN_NOT_FOUND(HttpStatus.NOT_FOUND, "부하 테스트 실행 결과를 찾을 수 없습니다"),
+
+    // 알림 (outbox)
+    // notification insert(큐잉) 자체가 실패한 경우 - uk_notification_target 중복은
+    // 정상 스킵이라 여기 안 해당하고, 그 외 DB 오류(커넥션 끊김 등)만 해당한다.
+    NOTIFICATION_QUEUE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "알림 큐잉에 실패했습니다"),
+    // 큐잉된 알림을 폴링/발송/상태갱신하는 과정(findPending, markSentBatch,
+    // incrementRetryCount, markFailed)에서 DB 오류가 난 경우.
+    NOTIFICATION_DISPATCH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "알림 발송 처리에 실패했습니다"),
 
     // 서버
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스를 일시적으로 사용할 수 없습니다"),

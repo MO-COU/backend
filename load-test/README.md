@@ -6,15 +6,53 @@ MO-COU 선착순 쿠폰 발급 시스템의 대용량 트래픽 동시성 처리
 
 ## 📋 테스트 시나리오 구성
 
-| 스크립트 | 대상 VU | 목적 및 시나리오 |
-| :--- | :---: | :--- |
-| **`smoke-issue.js`** | 10 VUs (각 1회) | 발급 API가 정상 동작하는지 소규모로 확인하는 스모크 테스트 |
-| **`rush-issue.js`** | **20,000명** (60초) | **[메인 시나리오]** 재고 10,000장에 20,000명이 몰렸을 때 10,000장 완판 및 0건 초과/중복 발급 검증 |
-| **`duplicate-issue.js`** | 1 VU (10회 반복) | 동일한 회원이 10번 연타했을 때 최초 1회만 성공하고 9회는 `409 DUPLICATE`로 차단되는지 검증 |
+모든 정식 시나리오는 재고 10,000장을 사용한다. V1~V3는 팀 합의 시나리오이고 V4~V6는 부하 형태를 비교하기 위한 추가 시나리오다.
+
+| 구분 | 시나리오 | 사용자·부하 | 램프업 | 요청 방식 | 총 요청 수 | 확인 목적 | 스크립트 |
+| :---: | :--- | ---: | :---: | :--- | :---: | :--- | :--- |
+| 필수 | `V1_RAMP_20000` | 20,000 VU | 60초·1초 단위 | 활성 VU가 같은 회원 ID로 반복 요청 | 서버 속도에 따라 변동 | 최대 처리량, 중복·품절 방어 | `rush-issue.js` |
+| 필수 | `V2_SPIKE_20000` | 20,000 VU | 없음 | 사용자마다 1회 요청 | 20,000건 | 공식 동시 요청 조건 | `spike-issue.js` |
+| 필수 | `V3_SPIKE_50000` | 50,000 VU | 없음 | 사용자마다 1회 요청 | 50,000건 | 더 큰 순간 부하와 5xx 확인 | `spike-issue.js` |
+| 추가 | `V4_RAMP_ONCE_20000` | 20,000 VU | 60초·1초 단위 | 사용자마다 1회 요청 | 20,000건 | 실제 사용자형 점진 유입 | `ramp-once-issue.js` |
+| 추가 | `V5_RATE_4000_RPS` | 4,000 req/s | 없음 | 5초 동안 요청률 고정 | 20,000건 | 요청률 유지와 dropped iteration 확인 | `rate-issue.js` |
+| 추가 | `V6_REPEAT_1_TO_3` | 20,000 VU | 없음 | 사용자마다 1~3회 요청 | 39,999건 | 제한적 재시도와 중복 방어 | `repeat-issue.js` |
+
+보조 스크립트는 정식 시나리오와 별도로 사용한다.
+
+| 스크립트 | 설정 | 목적 |
+| :--- | :--- | :--- |
+| `smoke-issue.js` | 10 VU·각 1회 | 발급 API의 기본 동작 확인 |
+| `duplicate-issue.js` | 동일 회원 1명이 10회 요청 | 최초 1회만 성공하고 나머지가 중복으로 차단되는지 확인 |
 
 ---
 
-세 스크립트 모두 실제 발급 상태를 변경한다. 테스트마다 전용 쿠폰을 사용하고 DB와 Redis를 초기 상태로 복구한다.
+관리자 실행 API에서 쿠폰 회차와 시나리오를 각각 선택한다. 같은 회차에서도 초기화 후 다른 시나리오를
+실행할 수 있고, 실행 조건과 결과는 `coupon_issue_run`에 함께 기록된다.
+
+| API 시나리오 | 시연 예시 회차 | 실행 설정 |
+| :--- | :---: | :--- |
+| `V1_RAMP_20000` | 301 | 20,000명, 60초 ramp-up |
+| `V2_SPIKE_20000` | 302 | 20,000명, 순간 유입 |
+| `V3_SPIKE_50000` | 303 | 50,000명, 순간 유입 |
+| `V4_RAMP_ONCE_20000` | 304 | 20,000명, 60초 ramp-up, 회원별 1회 |
+| `V5_RATE_4000_RPS` | 305 | 4,000 req/s, 5초, 총 20,000건 |
+| `V6_REPEAT_1_TO_3` | 306 | 20,000명, 사용자별 1~3회, 총 39,999건 |
+
+```http
+POST /api/admin/load-tests
+Content-Type: application/json
+
+{"couponId":301,"scenario":"V1_RAMP_20000"}
+```
+
+위 표는 시연할 때 사용할 기본 조합일 뿐 API가 강제하는 매핑이 아니다. 예를 들어 301회차에서
+`V2_SPIKE_20000`을 선택할 수도 있다. 선택한 회차는 `OPEN`이고 DB와 Redis 모두 발급 전 초기 상태여야 한다.
+
+상태 조회 API는 `RUNNING → SYNCING → SUCCESS` 순서로 바뀐다. `finishedAt`은 k6 요청 종료
+시각이고 `dbSyncFinishedAt`은 Redis Stream의 발급 이벤트가 DB에 모두 적재된 시각이다.
+DB 건수, Stream 잔여 건수와 pending 건수가 60초 안에 모두 맞지 않으면 실행은 `FAILED`가 된다.
+
+모든 발급 스크립트는 실제 발급 상태를 변경한다. 테스트마다 전용 쿠폰을 사용하고 DB와 Redis를 초기 상태로 복구한다.
 
 ## 사전 준비
 
@@ -63,7 +101,7 @@ Consumer가 Redis Stream 처리를 마친 뒤 테스트 쿠폰 데이터만 초�
 k6 run -e TARGET=http://localhost:8080 -e COUPON_ID=301 -e VUS=10 load-test/smoke-issue.js
 ```
 
-### 2. 본 선착순 부하 테스트 (2만 명 동시 접속)
+### 2. V1 램프업 테스트 (20,000명·60초)
 ```bash
 k6 run -e TARGET=http://localhost:8080 -e COUPON_ID=301 -e EXPECTED_STOCK=10000 load-test/rush-issue.js
 ```
@@ -79,21 +117,36 @@ k6 run -e TARGET=http://localhost:8080 -e COUPON_ID=301 -e VUS=20000 -e EXPECTED
 
 `EXPECTED_STOCK`은 실행 직전 Redis 재고와 같게 넣는다. 예를 들어 재고 1,000장에 2,000명이 요청하면 다음과 같다.
 
-`rush-issue.js`는 `ramping-vus`로 0명에서 `VUS`명까지 `RAMP_UP` 동안 사용자를 늘린다. 각 VU는 `memberId` 하나를 배정받아 발급 요청을 한 번만 보내므로, 중복 없는 사용자 수와 총 요청 수는 `VUS`와 같다. 기본 조건은 사용자 20,000명, ramp-up 60초다.
+`rush-issue.js`는 `ramping-vus`로 0명에서 20,000명까지 60초 동안 사용자를 늘린다. 1초마다 목표 VU를 다시 계산하므로 초당 약 333명씩 증가하고 마지막 60초에 20,000명에 도달한다. 각 VU에는 서로 다른 `memberId`를 부여하고 테스트가 끝날 때까지 같은 회원 ID로 반복 요청한다. 총 요청 수는 서버 응답 속도에 따라 달라지며 고정하지 않는다. 이 시나리오는 중복·품절 방어와 시스템 최대 처리량을 확인한다.
 
 ```bash
 k6 run \
   -e TARGET=http://localhost:8080 \
   -e COUPON_ID=301 \
-  -e VUS=2000 \
-  -e RAMP_UP=10s \
-  -e EXPECTED_STOCK=1000 \
+  -e VUS=20000 \
+  -e RAMP_UP=60s \
+  -e HOLD=10s \
+  -e EXPECTED_STOCK=10000 \
   load-test/rush-issue.js
 ```
 
 각 단계는 같은 쿠폰에 연속 실행하지 않고 위 초기화를 다시 한 뒤 실행한다.
 
-### 3. 중복 발급 방어 테스트
+### 3. 순간 유입 스파이크 테스트
+
+20,000명과 50,000명 버전은 같은 스크립트를 사용하고 `VUS`만 다르게 지정한다.
+
+```bash
+k6 run -e TARGET=http://localhost:8080 -e COUPON_ID=302 \
+  -e VUS=20000 -e EXPECTED_STOCK=10000 load-test/spike-issue.js
+
+k6 run -e TARGET=http://localhost:8080 -e COUPON_ID=303 \
+  -e VUS=50000 -e EXPECTED_STOCK=10000 load-test/spike-issue.js
+```
+
+`per-vu-iterations`로 VU마다 정확히 1회 요청한다. 이는 클릭 시각이 완전히 같은 것을 보장한다는 뜻이 아니라, k6가 VU를 준비한 뒤 가능한 한 짧은 구간에 요청을 몰아 보내는 테스트다. 50,000 VU는 부하 생성기 자체의 CPU·메모리 한계도 함께 확인해야 한다.
+
+### 4. 중복 발급 방어 테스트
 ```bash
 k6 run -e TARGET=http://localhost:8080 -e COUPON_ID=301 -e MEMBER_ID=999999 load-test/duplicate-issue.js
 ```
@@ -103,10 +156,10 @@ k6 run -e TARGET=http://localhost:8080 -e COUPON_ID=301 -e MEMBER_ID=999999 load
 ## 결과 검증 기준
 
 ### 1. k6 터미널 지표 검증
-* `http_reqs`: 정확히 **20,000**건
+* `http_reqs`: 서버 응답 속도에 따라 달라지는 전체 반복 요청 수 확인
 * `issue_success_202`: 정확히 **10,000**건
-* `issue_sold_out_409`: 정확히 **10,000**건
-* `issue_duplicate_409`: **0**건
+* `issue_sold_out_409`: V1은 **1건 이상**, V2는 **10,000건**, V3는 **40,000건**
+* `issue_duplicate_409`: V1은 **1건 이상**, V2/V3는 **0건**
 * `issue_system_error_5xx`: **0**건
 * `issue_other_error`: **0**건
 * `http_req_duration (p95)`: **2초(2000ms) 이내**
@@ -144,11 +197,13 @@ MODE=smoke VERIFY_DB=false VERIFY_REDIS=false ./load-test/run-full-flow.sh
 같은 쿠폰에 기존 발급 데이터가 있어도 신규 반영 건수를 기준으로 기다리려면 `EXPECTED_NEW_DB_COUNT`를 지정한다.
 
 ```bash
-MODE=rush COUPON_ID=301 VUS=20000 EXPECTED_STOCK=10000 \
+MODE=v1-ramp-20000 COUPON_ID=301 VUS=20000 EXPECTED_STOCK=10000 \
   EXPECTED_NEW_DB_COUNT=10000 VERIFY_DB=true VERIFY_REDIS=true \
-  VERIFY_CONSISTENCY=true ./load-test/run-full-flow.sh
+  VERIFY_CONSISTENCY=true ISSUE_RUN_ID=15 ./load-test/run-full-flow.sh
 ```
 
 결과 파일명과 k6 태그에 쓰는 `TEST_LABEL`은 DB의 숫자형 `run_id`와 별개다.
 
-`VERIFY_CONSISTENCY=true`이면 `POST /api/admin/verifications`로 검증을 시작하고 결과가 `PASS`, 위반 0건인지 확인한다. JSON 응답을 읽기 위해 `jq`가 필요하다.
+`VERIFY_CONSISTENCY=true`이면 `ISSUE_RUN_ID`를 대상으로
+`POST /api/admin/verifications?issueRunId={ISSUE_RUN_ID}`를 호출하고 결과가 `PASS`, 위반 0건인지 확인한다.
+JSON 응답을 읽기 위해 `jq`가 필요하다.

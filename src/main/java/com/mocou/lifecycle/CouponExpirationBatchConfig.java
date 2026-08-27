@@ -14,7 +14,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @Configuration
 @EnableBatchProcessing
 @EnableScheduling
-@EnableConfigurationProperties(CouponExpirationBatchProperties.class)
+@EnableConfigurationProperties({CouponExpirationBatchProperties.class, ExpirationSchedulerProperties.class})
 /** 만료 Job과 Step을 조립하고, 스케줄·설정 바인딩을 활성화한다. */
 public class CouponExpirationBatchConfig {
 

@@ -24,6 +24,23 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
     }
 
     @Override
+    public List<AdminCouponSummary> findAllSummaries() {
+        return jdbcTemplate.query(
+                "SELECT c.coupon_id, c.name, c.open_at, c.close_at, c.status, "
+                        + "cs.total_quantity "
+                        + "FROM coupon c JOIN coupon_stock cs ON cs.coupon_id = c.coupon_id "
+                        + "ORDER BY c.coupon_id DESC",
+                (resultSet, rowNumber) ->
+                        new AdminCouponSummary(
+                                resultSet.getLong("coupon_id"),
+                                resultSet.getString("name"),
+                                resultSet.getTimestamp("open_at").toLocalDateTime(),
+                                resultSet.getTimestamp("close_at").toLocalDateTime(),
+                                resultSet.getInt("total_quantity"),
+                                resultSet.getString("status")));
+    }
+
+    @Override
     public Optional<AdminCouponStock> findStock(long couponId) {
         return jdbcTemplate
                 .query(

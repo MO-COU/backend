@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.MySQLContainer;
 
 /**
@@ -19,6 +20,7 @@ import org.testcontainers.containers.MySQLContainer;
  * 테스트가 운영 조건을 재현하지 못한다. {@code @DynamicPropertySource}가 가장 높은 우선순위를 가지므로 자식 테스트에서는 덮어쓸 수
  * 없고, 여기서만 지정할 수 있다.
  */
+@TestPropertySource(properties = "mocou.lifecycle.expiration.scheduler-enabled=false")
 public abstract class MySqlContainerTest {
 
     private static final MySQLContainer<?> MYSQL =

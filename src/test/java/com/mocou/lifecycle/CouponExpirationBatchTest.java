@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 @SpringBootTest(
         properties = {
             "spring.batch.jdbc.initialize-schema=always",
+            "mocou.lifecycle.expiration.scheduler-enabled=false",
             "mocou.lifecycle.expiration.fixed-delay-ms=3600000"
         })
 class CouponExpirationBatchTest extends CouponLifecycleIntegrationTestSupport {

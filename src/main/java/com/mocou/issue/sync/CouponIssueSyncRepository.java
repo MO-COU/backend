@@ -18,10 +18,11 @@ public interface CouponIssueSyncRepository {
     /**
      * status가 'OPEN'인 쿠폰의 coupon_id 목록을 반환한다.
      *
-     * <p>컨슈머는 이 메서드를 스케줄 틱(기본 10ms)마다가 아니라, 시작 시 한 번과
-     * {@code CouponStatusChangedEvent}(coupon.status를 바꾸는 쪽, 예: 관리자 API가
-     * 발행)를 받을 때만 호출해 캐시를 갱신한다 — 매 틱 DB를 조회하면 그 자체가
-     * 병목이 되기 때문이다.
+     * <p>컨슈머는 이 메서드를 스케줄 틱(기본 10ms)마다가 아니라 앱 기동 시 딱 한 번만
+     * 호출해 "최초 활성 쿠폰"을 정한다 — 매 틱 DB를 조회하면 그 자체가 병목이 되기
+     * 때문이다. 기동 이후 활성 쿠폰이 바뀌는 것은 DB 재조회가 아니라
+     * {@code CouponSyncTargetChangedEvent}(발급을 실제로 시작시키는 API가 발행하며,
+     * couponId를 그대로 담아 전달)로만 반영한다.
      */
     List<Long> findOpenCouponIds();
 
