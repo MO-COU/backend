@@ -12,6 +12,7 @@ BACKUP_LOG_FILE="${BACKUP_LOG_FILE:-/var/log/mocou-log-backup.log}"
 LOG_DIR="${LOG_DIR:-}"
 AWS_COMMAND="${AWS_COMMAND:-aws}"
 LOGGER_COMMAND="${LOGGER_COMMAND:-logger}"
+FIND_COMMAND="${FIND_COMMAND:-find}"
 FAILED=false
 
 umask 077
@@ -103,9 +104,26 @@ backup_file() {
     log "INFO" "Local archive deleted after seven-day retention: ${file_path}"
 }
 
+backup_active_log() {
+    active_log_file="${LOG_DIR}/system-error.log"
+    if [ ! -f "${active_log_file}" ]; then
+        return
+    fi
+
+    if ! "${AWS_COMMAND}" s3 cp "${active_log_file}" \
+            "s3://${S3_BUCKET}/${S3_PREFIX}/active/system-error.log" --only-show-errors; then
+        record_failure "Active system error log upload failed: ${active_log_file}"
+        return
+    fi
+
+    log "INFO" "Active system error log upload completed: ${active_log_file}"
+}
+
 resolve_log_dir || exit 1
 
 ARCHIVE_DIR="${LOG_DIR}/archive"
+backup_active_log
+
 if [ ! -d "${ARCHIVE_DIR}" ]; then
     log "INFO" "Archive directory does not exist; nothing to back up: ${ARCHIVE_DIR}"
     exit 0
@@ -115,7 +133,10 @@ log "INFO" "S3 log backup started: ${ARCHIVE_DIR}"
 
 FILE_LIST="$(mktemp)"
 trap 'rm -f "${FILE_LIST}"' EXIT INT TERM
-find "${ARCHIVE_DIR}" -type f -name 'system-error.*.log.gz' -print > "${FILE_LIST}"
+if ! "${FIND_COMMAND}" "${ARCHIVE_DIR}" -type f -name 'system-error.*.log.gz' -print > "${FILE_LIST}"; then
+    record_failure "Archive file discovery failed: ${ARCHIVE_DIR}"
+    exit 1
+fi
 
 while IFS= read -r file_path; do
     [ -n "${file_path}" ] || continue

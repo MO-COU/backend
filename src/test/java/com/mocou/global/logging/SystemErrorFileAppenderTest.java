@@ -9,6 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.MDC;
 import org.slf4j.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -39,8 +40,8 @@ class SystemErrorFileAppenderTest {
     }
 
     @Test
-    @DisplayName("시스템 오류 파일에는 ERROR만 JSON 한 줄로 기록한다")
-    void writesOnlyErrorEventsAsJsonLines() throws Exception {
+    @DisplayName("시스템 오류 파일에는 ERROR의 안전한 메타데이터와 스택 프레임만 기록한다")
+    void writesOnlySafeErrorMetadataAndStackFrames() throws Exception {
         // given
         LoggerContext loggerContext = new LoggerContext();
         loggerContext.setMDCAdapter(new LogbackMDCAdapter());
@@ -53,11 +54,13 @@ class SystemErrorFileAppenderTest {
 
         try {
             // when
+            MDC.put("traceId", "trace-id-should-not-be-written");
             logger.warn("warn event must not be written to the system error file");
             logger.error(
-                    "errorTypes=java.lang.IllegalStateException",
+                    "memberId=100 should not be written to the system error file",
                     new IllegalStateException("member@example.com"));
         } finally {
+            MDC.clear();
             loggerContext.stop();
         }
 
@@ -70,9 +73,12 @@ class SystemErrorFileAppenderTest {
 
         JsonNode event = OBJECT_MAPPER.readTree(lines.getFirst());
         assertThat(event.path("level").asText()).isEqualTo("ERROR");
-        assertThat(event.path("message").asText())
-                .isEqualTo("errorTypes=java.lang.IllegalStateException");
-        assertThat(event.has("stack_trace")).isFalse();
+        assertThat(event.has("message")).isFalse();
+        assertThat(event.has("traceId")).isFalse();
+        assertThat(event.path("stack_trace").asText())
+                .contains(IllegalStateException.class.getName())
+                .doesNotContain("member@example.com");
+        assertThat(lines.getFirst()).doesNotContain("memberId=100");
         assertThat(lines.getFirst()).doesNotContain("member@example.com");
     }
 }

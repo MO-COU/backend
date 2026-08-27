@@ -16,11 +16,16 @@
             <fileNamePattern>${LOG_PATH:-logs}/archive/system-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
             <maxFileSize>10MB</maxFileSize>
         </rollingPolicy>
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <includeMdc>true</includeMdc>
-            <fieldNames>
-                <stackTrace>[ignore]</stackTrace>
-            </fieldNames>
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp/>
+                <logLevel/>
+                <loggerName/>
+                <threadName/>
+                <stackTrace>
+                    <throwableConverter class="com.mocou.global.logging.SafeThrowableConverter"/>
+                </stackTrace>
+            </providers>
         </encoder>
     </appender>
 

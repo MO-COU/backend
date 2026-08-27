@@ -31,7 +31,7 @@ Spring Boot ERROR 로그
 
 | 구분 | 컨테이너 경로 | 설명 |
 | --- | --- | --- |
-| 활성 파일 | `/app/logs/system-error.log` | 현재 기록 중인 파일. 백업 스크립트는 업로드하거나 삭제하지 않음 |
+| 활성 파일 | `/app/logs/system-error.log` | 현재 기록 중인 파일. 매 백업 실행 때 `active/system-error.log` S3 key로 업로드하며 로컬 파일은 삭제하지 않음 |
 | archive 파일 | `/app/logs/archive/system-error.YYYY-MM-DD.N.log.gz` | 백업 대상. 하루에 10MB를 넘으면 같은 날짜의 `N`이 증가할 수 있음 |
 
 Logback은 다음 로그 이벤트가 발생하는 시점에 날짜 롤링을 수행할 수 있다. 따라서 백업 스크립트는 "어제 파일 하나"가 아니라 archive 디렉터리에 존재하는 모든 `system-error.*.log.gz` 파일을 매일 재시도한다. 롤링이 늦은 파일도 이후 실행에서 유실 없이 업로드된다.
@@ -82,13 +82,14 @@ EC2 IAM Role에는 최소한 다음 객체 권한이 필요하다.
 ### 실행 알고리즘
 
 1. `mocou-app` 컨테이너의 `/app/logs` mount source를 확인한다. `LOG_DIR`이 지정된 경우 그 값을 사용한다.
-2. `<LOG_DIR>/archive/system-error.*.log.gz` 파일을 모두 찾는다.
-3. 파일명 날짜를 `YYYY/MM/DD` S3 key로 변환해 `aws s3 cp`로 업로드한다.
-4. 업로드 실패 파일은 로컬에 유지하고 `logger`와 상세 로그에 오류를 남긴다. 다른 파일 처리는 계속하며, 하나라도 실패하면 스크립트는 종료 코드 `1`로 끝난다.
-5. 파일별 첫 업로드 성공 시 `<archive-file>.s3-uploaded` marker를 생성한다. 이후 재업로드해도 marker 시각은 바꾸지 않는다.
-6. marker 생성 시각이 7일 이상 지난 파일만 삭제 후보로 삼는다. 따라서 S3 장애가 오래 지속된 뒤 복구돼도, 첫 성공 업로드 직후에는 삭제하지 않는다.
-7. 후보 파일은 `aws s3api head-object`로 동일 S3 key가 존재하는지 확인한다. 확인 실패 시 archive와 marker를 모두 유지한다.
-8. S3 객체 존재가 확인된 archive와 marker만 로컬에서 삭제한다.
+2. 활성 `system-error.log`가 있으면 `active/system-error.log` S3 key로 업로드한다. 이 파일은 삭제하지 않아, 다음 오류 이벤트가 없어 롤링되지 않은 마지막 오류도 S3에 보존한다.
+3. `<LOG_DIR>/archive/system-error.*.log.gz` 파일을 모두 찾는다.
+4. 파일명 날짜를 `YYYY/MM/DD` S3 key로 변환해 `aws s3 cp`로 업로드한다.
+5. 업로드 실패 파일은 로컬에 유지하고 `logger`와 상세 로그에 오류를 남긴다. 다른 파일 처리는 계속하며, 하나라도 실패하면 스크립트는 종료 코드 `1`로 끝난다.
+6. 파일별 첫 업로드 성공 시 `<archive-file>.s3-uploaded` marker를 생성한다. 이후 재업로드해도 marker 시각은 바꾸지 않는다.
+7. marker 생성 시각이 7일 이상 지난 파일만 삭제 후보로 삼는다. 따라서 S3 장애가 오래 지속된 뒤 복구돼도, 첫 성공 업로드 직후에는 삭제하지 않는다.
+8. 후보 파일은 `aws s3api head-object`로 동일 S3 key가 존재하는지 확인한다. 확인 실패 시 archive와 marker를 모두 유지한다.
+9. S3 객체 존재가 확인된 archive와 marker만 로컬에서 삭제한다.
 
 이 규칙으로 S3 업로드가 장기간 실패해도 미업로드 파일은 local volume에 남아 이후 실행에서 계속 재시도된다. 반대로 S3 적재가 완료된 파일은 EC2에서 7일의 추가 확인 기간을 거친다.
 
@@ -238,7 +239,7 @@ aws s3api get-bucket-lifecycle-configuration --bucket mocou-app-logs-2026
 | 업로드가 실패함 | `journalctl -t mocou-log-backup`, 전용 로그 | IAM Role, 네트워크, 버킷·prefix를 확인. 파일은 삭제되지 않고 다음 날 재시도됨 |
 | S3 객체 확인이 실패함 | 전용 로그의 `S3 object confirmation failed` | `s3:GetObject` 권한과 동일 S3 key를 확인. 로컬 파일은 유지됨 |
 | archive 파일이 없음 | `/app/logs/archive` 목록 확인 | 오류 이벤트가 없거나 다음 이벤트 전이라 롤링이 아직 발생하지 않았을 수 있음. 다음 cron에서 다시 탐색함 |
-| 현재 로그가 업로드되지 않음 | `system-error.log` 확인 | 정상 동작. 활성 파일은 백업 대상이 아니며 archive 파일만 업로드함 |
+| 활성 로그 업로드가 실패함 | `journalctl -t mocou-log-backup`, 전용 로그 | S3 권한·네트워크를 확인. 로컬 활성 파일은 삭제되지 않으며 다음 cron에서 다시 업로드함 |
 | 로컬 volume 사용량이 증가함 | `docker system df -v`, archive 목록 | S3 실패 파일은 의도적으로 보존됨. 실패 원인을 해결한 뒤 수동 실행으로 재업로드 |
 | cron이 실행되지 않음 | `sudo crontab -l`, `journalctl -u cron` | root crontab과 cron 서비스 상태를 확인 |
 
