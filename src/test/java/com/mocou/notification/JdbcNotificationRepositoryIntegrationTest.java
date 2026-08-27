@@ -114,6 +114,40 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
         assertThat(statusOf(untouchedId)).isEqualTo("PENDING");
     }
 
+    // outbox: 커밋 직후 즉시 발송 경로와의 중복을 막는 핵심 조건 - 방금 큐잉된(=아직 즉시
+    // 경로가 처리 중일 수 있는) row는 폴링이 절대 집어가면 안 된다.
+    @Test
+    @DisplayName("createdBefore보다 최근에 생성된 PENDING은 조회되지 않는다")
+    void excludesPendingNotificationsCreatedAfterCutoff() {
+        // given
+        insertCouponAndMember();
+        Long freshId = repository.save(record(NotificationType.ISSUE_SUCCESS));
+
+        // when
+        List<PendingNotification> excluded = repository.findPending(10, LocalDateTime.now().minusSeconds(5));
+
+        // then
+        assertThat(excluded).extracting(PendingNotification::notificationId).doesNotContain(freshId);
+    }
+
+    @Test
+    @DisplayName("createdBefore보다 오래된 PENDING은 정상적으로 조회된다")
+    void findsPendingNotificationsCreatedBeforeCutoff() {
+        // given
+        insertCouponAndMember();
+        Long oldId = repository.save(record(NotificationType.ISSUE_SUCCESS));
+        jdbcTemplate.update(
+                "UPDATE notification SET created_at = CURRENT_TIMESTAMP - INTERVAL 10 SECOND "
+                        + "WHERE notification_id = ?",
+                oldId);
+
+        // when
+        List<PendingNotification> found = repository.findPending(10, LocalDateTime.now().minusSeconds(5));
+
+        // then
+        assertThat(found).extracting(PendingNotification::notificationId).contains(oldId);
+    }
+
     @Test
     @DisplayName("회차별 발급 성공 알림 상태만 집계한다")
     void countsIssueSuccessNotificationStatusesByCoupon() {
