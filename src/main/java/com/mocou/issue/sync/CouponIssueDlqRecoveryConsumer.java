@@ -190,6 +190,8 @@ public class CouponIssueDlqRecoveryConsumer {
                 Long.parseLong(fields.get("couponId")),
                 Long.parseLong(fields.get("memberId")),
                 fields.get("eventId"),
+                Long.parseLong(fields.get("issueSequence")),
+                Long.parseLong(fields.get("remainingAtIssue")),
                 toIssuedAt(Long.parseLong(fields.get("reservedAtEpochSecond"))));
     }
 

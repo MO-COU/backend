@@ -52,7 +52,9 @@ class AdminCouponControllerTest {
                         "ISSUED",
                         LocalDateTime.of(2026, 8, 19, 10, 0),
                         null,
-                        LocalDateTime.of(2026, 8, 26, 10, 0));
+                        LocalDateTime.of(2026, 8, 26, 10, 0),
+                        5L,
+                        95L);
         given(service.getIssues(COUPON_ID, 0, 20))
                 .willReturn(new AdminCouponIssuePage(List.of(issue), 0, 20, 1, 1, false));
 
@@ -67,6 +69,8 @@ class AdminCouponControllerTest {
                         jsonPath("$.data.content[0].memberEmail")
                                 .value("ho*****@example.com"))
                 .andExpect(jsonPath("$.data.content[0].memberPhone").value("010-****-5678"))
+                .andExpect(jsonPath("$.data.content[0].issueSequence").value(5L))
+                .andExpect(jsonPath("$.data.content[0].remainingAtIssue").value(95L))
                 .andExpect(jsonPath("$.data.page").value(0))
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.hasNext").value(false));

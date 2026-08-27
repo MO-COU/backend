@@ -76,8 +76,8 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         List<CouponIssueSyncEvent> savedEvents = repository.saveBatch(
                 COUPON_ID,
                 List.of(
-                        syncEvent(MEMBER_ID_1, "event-1"),
-                        syncEvent(MEMBER_ID_2, "event-2")));
+                        syncEvent(MEMBER_ID_1, "event-1", 1L, 99L),
+                        syncEvent(MEMBER_ID_2, "event-2", 2L, 98L)));
 
         // then
         // 반환값은 알림 발송 대상을 결정하는 데 쓰이므로(saveBatch 내부에서 바로 큐잉),
@@ -90,6 +90,11 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         assertThat(expiresAtOf(COUPON_ID, MEMBER_ID_1)).isEqualTo(ISSUED_AT.plusDays(14));
         assertThat(issuedHistoryCount(COUPON_ID, MEMBER_ID_1)).isEqualTo(1);
         assertThat(remainingStockOf(COUPON_ID)).isEqualTo(98);
+        // Redis Lua(reserve-and-append-event)가 확정한 순번/잔여재고가 그대로 저장됐는지 확인
+        assertThat(issueSequenceOf(COUPON_ID, MEMBER_ID_1)).isEqualTo(1L);
+        assertThat(remainingAtIssueOf(COUPON_ID, MEMBER_ID_1)).isEqualTo(99L);
+        assertThat(issueSequenceOf(COUPON_ID, MEMBER_ID_2)).isEqualTo(2L);
+        assertThat(remainingAtIssueOf(COUPON_ID, MEMBER_ID_2)).isEqualTo(98L);
         // outbox: coupon_issue 저장과 같은 트랜잭션에서 알림도 PENDING으로 큐잉됐는지 확인
         assertThat(pendingNotificationCount(COUPON_ID, MEMBER_ID_1, "ISSUE_SUCCESS")).isEqualTo(1);
         assertThat(pendingNotificationCount(COUPON_ID, MEMBER_ID_2, "ISSUE_SUCCESS")).isEqualTo(1);
@@ -161,15 +166,15 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         insertMember(MEMBER_ID_1);
         insertMember(MEMBER_ID_2);
         // 이전 실행에서 이미 반영된 것처럼 member 1건을 미리 저장해 재전달 상황을 재현한다.
-        repository.saveBatch(COUPON_ID, List.of(syncEvent(MEMBER_ID_1, "event-1")));
+        repository.saveBatch(COUPON_ID, List.of(syncEvent(MEMBER_ID_1, "event-1", 1L, 99L)));
 
         // when
         // 재전달: member 1(이미 처리됨) + member 2(새 이벤트)가 같은 배치로 다시 들어옴
         List<CouponIssueSyncEvent> savedEvents = repository.saveBatch(
                 COUPON_ID,
                 List.of(
-                        syncEvent(MEMBER_ID_1, "event-1-redelivered"),
-                        syncEvent(MEMBER_ID_2, "event-2")));
+                        syncEvent(MEMBER_ID_1, "event-1-redelivered", 1L, 99L),
+                        syncEvent(MEMBER_ID_2, "event-2", 2L, 98L)));
 
         // then
         // skip된 member 1은 반환값에서 빠져야 한다 — 안 그러면 이미 발급 성공 알림을
@@ -185,9 +190,10 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         assertThat(remainingStockOf(COUPON_ID)).isEqualTo(98);
     }
 
-    private CouponIssueSyncEvent syncEvent(long memberId, String eventId) {
+    private CouponIssueSyncEvent syncEvent(
+            long memberId, String eventId, long issueSequence, long remainingAtIssue) {
         return new CouponIssueSyncEvent(
-                RecordId.of("1-1"), COUPON_ID, memberId, eventId, ISSUED_AT);
+                RecordId.of("1-1"), COUPON_ID, memberId, eventId, issueSequence, remainingAtIssue, ISSUED_AT);
     }
 
     private int issueCount(long couponId) {
@@ -212,6 +218,22 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         return jdbcTemplate.queryForObject(
                 "SELECT expires_at FROM coupon_issue WHERE coupon_id = ? AND member_id = ?",
                 LocalDateTime.class,
+                couponId,
+                memberId);
+    }
+
+    private long issueSequenceOf(long couponId, long memberId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT issue_sequence FROM coupon_issue WHERE coupon_id = ? AND member_id = ?",
+                Long.class,
+                couponId,
+                memberId);
+    }
+
+    private long remainingAtIssueOf(long couponId, long memberId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT remaining_at_issue FROM coupon_issue WHERE coupon_id = ? AND member_id = ?",
+                Long.class,
                 couponId,
                 memberId);
     }
