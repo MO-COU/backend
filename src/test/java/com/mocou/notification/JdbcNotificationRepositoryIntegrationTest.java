@@ -24,6 +24,7 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
     private static final long COUPON_ID = 2001L;
     private static final long MEMBER_ID = 1001L;
     private static final long MEMBER_ID_2 = 1002L;
+    private static final long MEMBER_ID_3 = 1003L;
 
     @Autowired private NotificationRepository repository;
 
@@ -111,6 +112,35 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
         assertThat(statusOf(id1)).isEqualTo("SENT");
         assertThat(statusOf(id2)).isEqualTo("SENT");
         assertThat(statusOf(untouchedId)).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("회차별 발급 성공 알림 상태만 집계한다")
+    void countsIssueSuccessNotificationStatusesByCoupon() {
+        insertCouponAndMember(MEMBER_ID);
+        insertCouponAndMember(MEMBER_ID_2);
+        insertCouponAndMember(MEMBER_ID_3);
+        Long sentId = repository.save(record(MEMBER_ID, NotificationType.ISSUE_SUCCESS));
+        repository.save(record(MEMBER_ID_2, NotificationType.ISSUE_SUCCESS));
+        Long failedId = repository.save(record(MEMBER_ID_3, NotificationType.ISSUE_SUCCESS));
+        repository.save(record(MEMBER_ID, NotificationType.USED));
+        repository.markSentBatch(List.of(sentId), LocalDateTime.now());
+        repository.markFailed(failedId);
+
+        NotificationStatusCounts counts = repository.countIssueSuccessByCouponId(COUPON_ID);
+
+        assertThat(counts).isEqualTo(new NotificationStatusCounts(3, 1, 1, 1));
+    }
+
+    @Test
+    @DisplayName("발급 성공 알림이 없는 회차는 모든 집계를 0으로 반환한다")
+    void returnsZeroCountsWhenIssueSuccessNotificationDoesNotExist() {
+        insertCouponAndMember();
+        repository.save(record(NotificationType.USED));
+
+        NotificationStatusCounts counts = repository.countIssueSuccessByCouponId(COUPON_ID);
+
+        assertThat(counts).isEqualTo(new NotificationStatusCounts(0, 0, 0, 0));
     }
 
     @Test

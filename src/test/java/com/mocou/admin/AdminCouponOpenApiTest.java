@@ -13,6 +13,24 @@ import org.junit.jupiter.api.Test;
 class AdminCouponOpenApiTest {
 
     @Test
+    @DisplayName("알림 처리 현황 조회의 Swagger 성공 및 오류 응답을 명세한다")
+    void documentsNotificationCountsOperation() throws Exception {
+        Method method = AdminCouponController.class.getMethod("getNotificationCounts", long.class);
+        Tag tag = method.getAnnotation(Tag.class);
+        Operation operation = method.getAnnotation(Operation.class);
+        ApiResponses responses = method.getAnnotation(ApiResponses.class);
+
+        assertThat(tag.name()).isEqualTo("Notification");
+        assertThat(tag.description()).isEqualTo("관리자 알림 처리 현황 조회 API");
+        assertThat(operation.summary()).isEqualTo("알림 처리 현황 조회");
+        assertThat(operation.description())
+                .isEqualTo("회차별 발급 성공 알림의 전체·완료·대기·실패 건수를 조회합니다.");
+        assertThat(Arrays.stream(responses.value())
+                .map(io.swagger.v3.oas.annotations.responses.ApiResponse::responseCode))
+                .containsExactlyInAnyOrder("200", "400", "404");
+    }
+
+    @Test
     @DisplayName("발급 결과와 DB 적재 진행 조회의 Swagger 성공 및 오류 응답을 명세한다")
     void documentsIssueResultCountsOperation() throws Exception {
         Method method = AdminCouponController.class.getMethod("getIssueResultCounts", long.class);

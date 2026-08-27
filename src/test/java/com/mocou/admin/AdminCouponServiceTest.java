@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verify;
 
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
+import com.mocou.notification.NotificationRepository;
+import com.mocou.notification.NotificationStatusCounts;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -26,7 +28,35 @@ class AdminCouponServiceTest {
     @Mock private AdminCouponRepository repository;
     @Mock private AdminCouponRealtimeStockRepository realtimeStockRepository;
     @Mock private RedisAdminCouponIssueResultRepository issueResultRepository;
+    @Mock private NotificationRepository notificationRepository;
     @InjectMocks private AdminCouponService service;
+
+    @Test
+    @DisplayName("존재하는 쿠폰의 알림 처리 현황을 조회한다")
+    void returnsNotificationCounts() {
+        given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(notificationRepository.countIssueSuccessByCouponId(COUPON_ID))
+                .willReturn(new NotificationStatusCounts(10_000, 9_900, 90, 10));
+
+        AdminCouponNotificationCounts result = service.getNotificationCounts(COUPON_ID);
+
+        assertThat(result)
+                .isEqualTo(new AdminCouponNotificationCounts(COUPON_ID, 10_000, 9_900, 90, 10));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 쿠폰의 알림 처리 현황 조회를 거부한다")
+    void rejectsNotificationCountsForMissingCoupon() {
+        given(repository.existsCoupon(COUPON_ID)).willReturn(false);
+
+        assertThatThrownBy(() -> service.getNotificationCounts(COUPON_ID))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.COUPON_NOT_FOUND));
+        verify(notificationRepository, never()).countIssueSuccessByCouponId(COUPON_ID);
+    }
 
     @Test
     @DisplayName("존재하는 쿠폰의 실시간 발급 결과를 조회한다")

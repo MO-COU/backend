@@ -2,6 +2,7 @@ package com.mocou.admin;
 
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
+import com.mocou.notification.NotificationRepository;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,14 +15,17 @@ public class AdminCouponService {
     private final AdminCouponRepository repository;
     private final AdminCouponRealtimeStockRepository realtimeStockRepository;
     private final RedisAdminCouponIssueResultRepository issueResultRepository;
+    private final NotificationRepository notificationRepository;
 
     public AdminCouponService(
             AdminCouponRepository repository,
             AdminCouponRealtimeStockRepository realtimeStockRepository,
-            RedisAdminCouponIssueResultRepository issueResultRepository) {
+            RedisAdminCouponIssueResultRepository issueResultRepository,
+            NotificationRepository notificationRepository) {
         this.repository = repository;
         this.realtimeStockRepository = realtimeStockRepository;
         this.issueResultRepository = issueResultRepository;
+        this.notificationRepository = notificationRepository;
     }
 
     @Transactional(readOnly = true)
@@ -35,6 +39,14 @@ public class AdminCouponService {
         validateCouponExists(couponId);
         AdminCouponIssueResultCounts counts = issueResultRepository.findCounts(couponId);
         return counts.withPersistenceProgress(repository.countIssues(couponId));
+    }
+
+    @Transactional(readOnly = true)
+    public AdminCouponNotificationCounts getNotificationCounts(long couponId) {
+        validateCouponId(couponId);
+        validateCouponExists(couponId);
+        return AdminCouponNotificationCounts.of(
+                couponId, notificationRepository.countIssueSuccessByCouponId(couponId));
     }
 
     @Transactional(readOnly = true)
