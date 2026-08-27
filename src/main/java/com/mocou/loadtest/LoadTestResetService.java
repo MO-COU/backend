@@ -91,21 +91,29 @@ public class LoadTestResetService {
      * 지울 수 없는 것</b>이다. 그대로 두면 리셋이 끝난 뒤 컨슈머가 DB에 넣어, 방금 지운 발급이 되살아난다.
      */
     private void rejectIfSyncInProgress(long couponId) {
-        long unacknowledged = unacknowledgedCount(CouponRedisKey.issueStream(couponId));
+        long unacknowledged = unacknowledgedCount(
+                CouponRedisKey.issueStream(couponId), RedisCouponIssueSyncGateway.GROUP_NAME);
         if (unacknowledged > 0) {
             throw new BusinessException(
                     ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS,
                     "발급 이벤트 %d건이 컨슈머에서 처리 중이다. 끝난 뒤 다시 요청해야 한다".formatted(unacknowledged));
         }
+
+        // DLQ로 넘어가 아직 복구 시도 중인 건도 "동기화 진행 중"이다 — 여기서 지우면
+        // 복구가 성공했을 때 방금 지운 발급이 되살아난다.
+        long dlqUnacknowledged = unacknowledgedCount(
+                CouponRedisKey.issueDlqStream(couponId), RedisCouponIssueSyncGateway.DLQ_GROUP_NAME);
+        if (dlqUnacknowledged > 0) {
+            throw new BusinessException(
+                    ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS,
+                    "DLQ에서 재시도 중인 발급 이벤트 %d건이 있다. 끝난 뒤 다시 요청해야 한다".formatted(dlqUnacknowledged));
+        }
     }
 
     /** 컨슈머 그룹이 아직 없으면 미확인 건도 없다. 부하 테스트를 한 번도 돌리지 않은 경우다. */
-    private long unacknowledgedCount(String streamKey) {
+    private long unacknowledgedCount(String streamKey, String groupName) {
         try {
-            var pending =
-                    redisTemplate
-                            .opsForStream()
-                            .pending(streamKey, RedisCouponIssueSyncGateway.GROUP_NAME);
+            var pending = redisTemplate.opsForStream().pending(streamKey, groupName);
             return pending == null ? 0 : pending.getTotalPendingMessages();
         } catch (DataAccessException groupNotFound) {
             return 0;
@@ -118,6 +126,8 @@ public class LoadTestResetService {
      * <p>재고만 되돌리면 {@code issued-members}에 남은 회원이 다음 부하 테스트에서 중복으로 걸러진다.
      * 결과 카운터를 남겨두면 이전 회차의 예약 성공·품절 결과가 다음 회차에 누적된다.
      * 스트림을 지우면 컨슈머 그룹도 함께 사라지므로 초기화 단계에서 다시 생성한다.
+     * DLQ 스트림도 함께 지운다 — 남겨두면 같은 couponId를 재사용하는 다음 부하 테스트에서
+     * 지난 회차의 유령 이벤트가 DLQ 복구 컨슈머에 의해 되살아난다.
      */
     private void deleteRedisKeys(long couponId) {
         redisTemplate.delete(
@@ -126,6 +136,7 @@ public class LoadTestResetService {
                         CouponRedisKey.metadata(couponId),
                         CouponRedisKey.issuedMembers(couponId),
                         CouponRedisKey.issueStream(couponId),
+                        CouponRedisKey.issueDlqStream(couponId),
                         CouponRedisKey.issueResultCounts(couponId)));
     }
 
@@ -199,8 +210,13 @@ public class LoadTestResetService {
      * 그대로 재현된다.</b>
      *
      * <p>이미 있으면 아무 일도 하지 않는 멱등 연산이라 리셋을 두 번 불러도 안전하다.
+     *
+     * <p>DLQ 그룹은 사실 지연 생성(DLQ 복구 컨슈머가 NOGROUP을 감지하면 스스로 다시 만듦)이라
+     * 없어도 자동 복구되지만, 메인 그룹과 같은 이유로 불필요한 에러 로그/지연 없이 바로
+     * 정상 상태로 두기 위해 여기서도 함께 되살린다.
      */
     private void restoreConsumerGroup(long couponId) {
         syncGateway.ensureConsumerGroup(couponId);
+        syncGateway.ensureDlqConsumerGroup(couponId);
     }
 }

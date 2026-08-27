@@ -281,6 +281,12 @@ if [[ "${VERIFY_REDIS}" == "true" ]]; then
   stream_length="$(docker exec "${REDIS_CONTAINER}" redis-cli XLEN "coupon:{${COUPON_ID}}:issue-stream")"
   pending_count="$(docker exec "${REDIS_CONTAINER}" redis-cli XPENDING \
     "coupon:{${COUPON_ID}}:issue-stream" coupon-issue-db-sync | sed -n '1p')"
+  # 재시도 한도를 넘긴 이벤트는 보상되지 않고 DLQ로 옮겨져 복구를 계속 시도한다.
+  # 여기를 확인하지 않으면 "재고/DB 불일치"가 실제 버그인지 DLQ에서 아직 복구
+  # 중인 것뿐인지 구분할 수 없다.
+  dlq_stream_length="$(docker exec "${REDIS_CONTAINER}" redis-cli XLEN "coupon:{${COUPON_ID}}:issue-dlq")"
+  dlq_pending_count="$(docker exec "${REDIS_CONTAINER}" redis-cli XPENDING \
+    "coupon:{${COUPON_ID}}:issue-dlq" coupon-issue-dlq-recovery | sed -n '1p')"
   db_summary="$(docker exec "${MYSQL_CONTAINER}" \
     mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" "${MYSQL_DATABASE}" -Nse \
     "SELECT cs.total_quantity, cs.remaining_quantity, COUNT(ci.coupon_issue_id)
@@ -311,6 +317,10 @@ if [[ "${VERIFY_REDIS}" == "true" ]]; then
   print_result "처리되지 않은 Stream 이벤트" "0" "${stream_length}" \
     || verification_failed=true
   print_result "Consumer Pending 이벤트" "0" "${pending_count}" \
+    || verification_failed=true
+  print_result "DLQ에 남은 미복구 이벤트" "0" "${dlq_stream_length}" \
+    || verification_failed=true
+  print_result "DLQ Consumer Pending 이벤트" "0" "${dlq_pending_count}" \
     || verification_failed=true
   echo "=========================================="
 

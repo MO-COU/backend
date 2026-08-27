@@ -61,8 +61,13 @@ public enum ErrorCode {
     // 서버
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스를 일시적으로 사용할 수 없습니다"),
     SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다"),
-    // BusinessException으로 던져지지 않고 issue_failure_log.failure_reason 기록용으로만
-    // 쓰인다 — CouponIssueSyncConsumer가 재시도 한도를 넘겨 포기한 발급을 남길 때 사용.
+    // 아래 둘 다 BusinessException으로 던져지지 않고 issue_failure_log.failure_reason
+    // 기록용으로만 쓰인다 — 같은 발급 건이 두 단계를 거칠 수 있어 값을 나눈다.
+    // 1) 메인 스트림 재시도(5회) 한도 초과 → DLQ로 이동한 시점. 아직 최종 실패가
+    //    아니라 CouponIssueSyncConsumer가 여기서는 알림을 보내지 않는다.
+    SYNC_RETRY_LIMIT_EXCEEDED(HttpStatus.INTERNAL_SERVER_ERROR, "발급 동기화 재시도 한도를 초과해 DLQ로 이동했습니다"),
+    // 2) DLQ 복구마저 자체 한도를 넘겨 최종 포기한 시점. CouponIssueDlqRecoveryConsumer가
+    //    여기서 재고를 보상하고 이 사유로 기록한 뒤 회원에게 실패 알림을 보낸다.
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "쿠폰 발급 동기화에 실패했습니다");
 
     private final HttpStatus status;
