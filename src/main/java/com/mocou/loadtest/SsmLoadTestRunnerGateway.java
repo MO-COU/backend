@@ -22,6 +22,9 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
 
     private static final String RESULT_PREFIX = "MOCOU_RESULT=";
 
+    /** 최대 시나리오(V3, 5만 VU)의 두 배 남짓. k6 EC2의 hard limit(524288) 안이라 특권 없이 올라간다. */
+    private static final int FILE_DESCRIPTOR_LIMIT = 262_144;
+
     private final SsmClient ssmClient;
     private final LoadTestSsmProperties properties;
     private final LoadTestRunRepository repository;
@@ -146,6 +149,12 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
         String logFile = "/tmp/mocou-run-" + runId + "-k6.log";
         return "cd "
                 + shellQuote(properties.workDirectory())
+                // VU 하나가 소켓 하나를 연다. SSM Run Command는 PAM 로그인 세션이 아니라
+                // /etc/security/limits.conf가 적용되지 않고 soft limit이 기본 1024로 남는다.
+                // 그대로 두면 2만 VU에서 연결을 못 열어 대부분 request timeout이 된다.
+                // hard limit 안에서 올리는 것이라 특권이 필요 없다.
+                + " && ulimit -n "
+                + FILE_DESCRIPTOR_LIMIT
                 + " && SUMMARY_FILE="
                 + shellQuote(summaryFile)
                 + " TARGET="
