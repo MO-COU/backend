@@ -195,7 +195,7 @@ sudo logrotate -d /etc/logrotate.d/mocou-log-backup
 
 ## S3 Lifecycle 설정
 
-S3 콘솔에서 `mocou-app-logs-2026` 버킷에 아래 규칙을 추가한다.
+`mocou-app-logs-2026` 버킷에 아래 규칙을 추가한다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -209,6 +209,27 @@ S3 콘솔에서 `mocou-app-logs-2026` 버킷에 아래 규칙을 추가한다.
 ```bash
 aws s3api get-bucket-lifecycle-configuration --bucket mocou-app-logs-2026
 ```
+
+현재 버킷은 `NoSuchLifecycleConfiguration` 응답으로 기존 규칙이 없음을 확인했다. 따라서 최초 적용은 다음 명령으로 한다. 성공하면 출력은 없고 종료 코드는 `0`이다.
+
+```bash
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket mocou-app-logs-2026 \
+  --lifecycle-configuration '{
+    "Rules": [
+      {
+        "ID": "expire-prod-system-error-logs-after-90-days",
+        "Status": "Enabled",
+        "Filter": { "Prefix": "prod/system-error/" },
+        "Expiration": { "Days": 90 }
+      }
+    ]
+  }'
+
+aws s3api get-bucket-lifecycle-configuration --bucket mocou-app-logs-2026
+```
+
+마지막 조회 결과에는 위 `ID`, prefix, `Expiration.Days: 90`이 보여야 한다. 나중에 이 버킷에 다른 Lifecycle 규칙을 추가했다면 `put-bucket-lifecycle-configuration`은 전체 규칙을 교체하므로, 조회한 기존 규칙과 새 규칙을 하나의 `Rules` 목록으로 함께 제출한다.
 
 ## 장애 대응
 
