@@ -31,6 +31,8 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-validation")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
+	implementation(platform("software.amazon.awssdk:bom:2.49.6"))
+	implementation("software.amazon.awssdk:ssm")
 
 	// API 문서 (Swagger UI)
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")

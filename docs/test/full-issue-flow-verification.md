@@ -93,7 +93,7 @@ MODE=smoke COUPON_ID=301 VERIFY_DB=true VERIFY_REDIS=true \
   ./load-test/run-full-flow.sh
 ```
 
-스모크 테스트가 통과하면 `MODE=duplicate`, 마지막으로 `MODE=rush` 순서로 진행한다.
+스모크 테스트가 통과하면 `MODE=duplicate`, 마지막으로 `MODE=v1-ramp-20000` 순서로 진행한다. 순간 유입 비교에는 `MODE=v2-spike-20000` 또는 `MODE=v3-spike-50000`을 별도로 실행한다.
 각 테스트는 발급 데이터를 변경하므로 테스트마다 새로운 쿠폰을 사용하거나 DB와 Redis를 초기화한다.
 
 테스트 단계는 아래 순서를 지킨다. 앞 단계가 실패하면 다음 단계로 넘어가지 않는다.
@@ -102,16 +102,23 @@ MODE=smoke COUPON_ID=301 VERIFY_DB=true VERIFY_REDIS=true \
 | --- | --- | --- |
 | smoke | 연결과 응답 규격 확인 | 요청·응답 및 서버 로그 정상 |
 | duplicate | 동일 회원 중복 방어 확인 | DB 중복 0건 |
-| rush | 20,000명 최종 부하와 정합성 확인 | 아래 완료 기준 전부 충족 |
+| v1-ramp-20000 | 고유 사용자 20,000명·60초 ramp-up | 아래 완료 기준 전부 충족 |
+| v2-spike-20000 | 20,000명의 순간 유입 | 초과·중복 발급 0, 5xx 0 |
+| v3-spike-50000 | 50,000명의 순간 유입과 부하 생성기 한계 | 초과·중복 발급 0, 5xx 및 자원 지표 기록 |
+| v4-ramp-once-20000 | 20,000명이 60초 동안 유입되어 1회씩 요청 | 발급 10,000건, 품절 10,000건, 중복 0건 |
+| v5-rate-4000-rps | 초당 4,000건씩 5초 동안 요청 | 총 20,000건, dropped iteration 0건 |
+| v6-repeat-1-to-3 | 20,000명이 각 1~3회 요청 | 총 39,999건, 중복·품절 방어 확인 |
 
-`rush`는 `ramping-vus`로 60초 동안 중복 없는 사용자를 0명에서 20,000명까지 늘린다. 각 사용자는 발급 API를 한 번만 호출한다.
+`v1-ramp-20000`은 `ramping-vus`로 1초마다 목표 VU를 높여 60초 동안 고유 사용자를 0명에서 20,000명까지 늘린다. 활성 VU는 같은 회원 ID로 테스트 종료까지 반복 요청한다. 따라서 총 요청 수는 서버 응답 속도에 따라 달라진다.
+
+`v4-ramp-once-20000`은 V1과 같은 유입 속도에서 회원별 요청을 1회로 제한한다. V1과 V4를 비교하면 반복 요청이 처리량과 중복 판정에 주는 영향을 확인할 수 있다.
 
 최종 완판 테스트는 테스트 시작 전 DB 건수를 기준으로 신규 10,000건이 반영될 때까지 기다리도록 기대값을 지정한다.
 
 ```bash
-MODE=rush COUPON_ID=301 VUS=20000 RAMP_UP=60s EXPECTED_STOCK=10000 \
+MODE=v1-ramp-20000 COUPON_ID=301 VUS=20000 RAMP_UP=60s EXPECTED_STOCK=10000 \
   VERIFY_DB=true VERIFY_REDIS=true VERIFY_CONSISTENCY=true \
-  EXPECTED_NEW_DB_COUNT=10000 \
+  EXPECTED_NEW_DB_COUNT=10000 ISSUE_RUN_ID=15 \
   ./load-test/run-full-flow.sh
 ```
 

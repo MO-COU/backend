@@ -50,6 +50,13 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_APP_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
+
+      # 부하 테스트 실행 API (k6 SSM 연동). k6 EC2는 app EC2와 분리되어 있으므로
+      # MOCOU_INSTANCE_ID_K6/MOCOU_K6_TARGET_URL은 기본값 없이 .env에서 반드시 채워야 함.
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      MOCOU_INSTANCE_ID_K6: ${MOCOU_INSTANCE_ID_K6}
+      MOCOU_K6_WORK_DIRECTORY: ${MOCOU_K6_WORK_DIRECTORY:-/home/ubuntu/backend}
+      MOCOU_K6_TARGET_URL: ${MOCOU_K6_TARGET_URL}
     ports:
       - "8080:8080"
 

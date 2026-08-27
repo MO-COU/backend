@@ -24,12 +24,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import com.mocou.coupon.CouponStatusChangedEvent;
 import com.mocou.global.exception.ErrorCode;
 import com.mocou.issue.CouponRedisKey;
 import com.mocou.issue.RedisCouponIssueGateway;
-import com.mocou.notification.NotificationSender;
-import com.mocou.notification.NotificationType;
 
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -48,8 +45,10 @@ import lombok.extern.slf4j.Slf4j;
  * 안 그러면 이 빈이 뜬 모든 테스트가 OPEN 쿠폰이 있을 때마다 Redis 연결을
  * 시도해 무관한 테스트까지 오염시킨다.
  *
- * <p>동시에 열려있는 쿠폰이 여러 개인 경우는 다루지 않는다(1차 MVP는 쿠폰
- * 하나 기준) — {@link #consume()}은 여러 건이 와도 하나만 처리한다.
+ * <p>여러 쿠폰이 동시에 {@code OPEN} 상태일 수 있지만, 실제로 발급을 처리하는 것은
+ * 항상 하나뿐이다(관리자가 하나씩 순차로 진행시키는 운영 절차). {@link #consume()}은
+ * {@code activeCouponId} 하나만 폴링하며, 활성 쿠폰은 {@link #onSyncTargetChanged}로
+ * 전환된다.
  */
 @Slf4j
 @Component
@@ -67,7 +66,6 @@ public class CouponIssueSyncConsumer {
     private final RedisCouponIssueSyncGateway syncGateway;
     private final RedisCouponIssueGateway issueGateway;
     private final CouponIssueSyncRepository repository;
-    private final NotificationSender notificationSender;
     private final CouponIssueSyncProperties properties;
 
     private final StreamBuffer buffer = new StreamBuffer();
@@ -75,37 +73,70 @@ public class CouponIssueSyncConsumer {
     private Long groupEnsuredForCouponId;
     // XPENDING을 다시 확인해도 되는 시점. 매 틱마다 하면 낭비라 pendingCheckIntervalMs 간격으로 제한.
     private Instant nextPendingCheckAt = Instant.EPOCH;
-    // 매 틱(10ms)마다 DB를 조회하면 그 자체가 병목이라, 시작 시 한 번만 채우고 이후는
-    // CouponStatusChangedEvent(관리자 API가 상태를 바꿀 때 발행)를 받을 때만 갱신한다.
-    // @Scheduled 스레드와 이벤트를 발행하는 쪽(관리자 API 요청 스레드)이 다를 수 있어
-    // volatile로 가시성을 보장한다 — 참조를 통째로 교체만 하니 이 정도로 충분하다.
-    private volatile List<Long> openCouponIds = List.of();
+    // 지금 실제로 폴링 중인 couponId. consume() 스레드(@Scheduled)에서만 읽고 쓰므로
+    // activeCouponId와 달리 volatile이 필요 없다 — 매 tick 이 값과 activeCouponId를
+    // 비교해서 대상이 바뀌었는지만 판단한다.
+    private Long polledCouponId;
+    // "지금 활성화해야 할" couponId. 앱 기동 시 DB 조회로 한 번 정해지고, 이후로는
+    // CouponSyncTargetChangedEvent(발급을 시작시키는 API가 발행)를 받을 때만 바뀐다 —
+    // 매 틱(10ms) DB를 조회하면 그 자체가 병목이라서다. @Scheduled 스레드와 이벤트를
+    // 발행하는 쪽(API 요청 스레드)이 다를 수 있어 volatile로 가시성을 보장한다.
+    private volatile Long activeCouponId;
 
-    /** 빈이 뜰 때 한 번만 DB를 조회해 캐시를 채운다 — "최초 실행 시 한 번만" 조회. */
+    /** 빈이 뜰 때 한 번만 DB를 조회해 최초 활성 쿠폰을 정한다 — 그 이후는 이벤트로만 바뀐다. */
     @PostConstruct
-    void initOpenCouponIds() {
-        refreshOpenCouponIds();
+    void initActiveCouponId() {
+        List<Long> openCouponIds = repository.findOpenCouponIds();
+        activeCouponId = openCouponIds.isEmpty() ? null : openCouponIds.getFirst();
     }
 
-    /** 관리자 API 등이 coupon.status를 바꾸고 발행하는 이벤트를 받아 캐시를 다시 채운다. */
+    /**
+     * 특정 쿠폰의 발급 처리를 실제로 시작시키는 쪽(예: 부하 테스트 시작 API)이 발행하는
+     * 이벤트를 받아 활성 쿠폰을 즉시 전환한다. DB를 다시 조회하지 않고 이벤트가 담아온
+     * couponId를 그대로 신뢰한다 — 여러 쿠폰이 동시에 OPEN이어도 실제로 처리할 하나는
+     * 이 이벤트가 정하기 때문이다.
+     */
     @EventListener
-    void onCouponStatusChanged(CouponStatusChangedEvent event) {
-        refreshOpenCouponIds();
-    }
-
-    private void refreshOpenCouponIds() {
-        openCouponIds = repository.findOpenCouponIds();
+    void onSyncTargetChanged(CouponSyncTargetChangedEvent event) {
+        activeCouponId = event.couponId();
     }
 
     // fixedDelay라 consume()은 절대 자기 자신과 동시에 두 번 안 돈다 — 상태 필드 동시성 걱정 없음.
     @Scheduled(fixedDelayString = "${mocou.issue.sync.poll-interval-ms:10}")
     public void consume() {
-        List<Long> couponIds = openCouponIds;
-        if (couponIds.isEmpty()) {
+        Long couponId = activeCouponId;
+        if (couponId == null) {
             return;
         }
+        if (!couponId.equals(polledCouponId)) {
+            switchActiveCoupon(couponId);
+        }
 
-        pollOnce(couponIds.getFirst());
+        pollOnce(couponId);
+    }
+
+    /**
+     * 활성 쿠폰이 바뀌었을 때 이전 쿠폰에 묶여 있던 폴링 상태를 전부 리셋한다.
+     * consume() 스레드에서만 호출되므로 buffer/groupEnsuredForCouponId 등을 잠금 없이
+     * 건드려도 안전하다.
+     *
+     * <p>운영 시나리오상 다음 쿠폰은 이전 쿠폰의 처리가 완전히 끝난 뒤에만 활성화되므로
+     * 전환 시점에 버퍼가 남아 있으면 안 된다. 그래도 버퍼가 남아 있다면(운영 절차를 어기고
+     * 전환한 경우) 그 이벤트들은 아직 XACK되지 않았으므로 유실은 아니다 — Redis PEL에
+     * 그대로 남아, 이전 couponId가 다시 활성화되면 재처리된다.
+     */
+    private void switchActiveCoupon(long couponId) {
+        if (polledCouponId != null && !buffer.records.isEmpty()) {
+            log.warn(
+                    "이전 쿠폰({})의 미확정 배치가 {}건 남은 채로 활성 쿠폰이 {}로 바뀌었다. "
+                            + "버퍼만 비우고 XACK는 하지 않으므로 Redis PEL에는 그대로 남는다.",
+                    polledCouponId, buffer.records.size(), couponId);
+        }
+        buffer.records.clear();
+        buffer.deadline = null;
+        groupEnsuredForCouponId = null;
+        nextPendingCheckAt = Instant.EPOCH;
+        polledCouponId = couponId;
     }
 
     /**
@@ -152,19 +183,15 @@ public class CouponIssueSyncConsumer {
     /**
      * XREADGROUP은 그룹이 없으면 NOGROUP 에러를 던지므로 미리 보장해둔다.
      *
-     * <p>그룹을 실제로 (다시) 만들어야 하는 시점(최초 실행, 또는 NOGROUP 감지로 캐시가
-     * 무효화된 뒤)은 캐시가 최신이 아니었을 수 있다는 신호이기도 하다 — {@code openCouponIds}는
-     * {@code CouponStatusChangedEvent}로만 갱신되는데, 그 이벤트가 유실되거나 재시작 시점에
-     * DB 상태 반영이 늦었을 수 있다. 그래서 그룹 생성 직전에 OPEN 쿠폰 목록도 한 번 더
-     * 조회해서 같이 최신화한다. 그룹 생성 자체가 드문(캐시 히트가 대부분인) 이벤트라 매
-     * tick DB를 두드리는 것과 달리 부담이 없다.
+     * <p>{@code activeCouponId}는 더 이상 "DB 재조회로 최신화하는 캐시"가 아니라
+     * {@code CouponSyncTargetChangedEvent}가 직접 전달한, 신뢰할 수 있는 전환 대상이라
+     * 그룹 생성 직전에 DB를 다시 확인할 필요가 없다.
      */
     private void ensureConsumerGroup(long couponId) {
         if (groupEnsuredForCouponId != null && groupEnsuredForCouponId == couponId) {
             return;
         }
 
-        refreshOpenCouponIds();
         syncGateway.ensureConsumerGroup(couponId);
         groupEnsuredForCouponId = couponId;
     }
@@ -255,6 +282,7 @@ public class CouponIssueSyncConsumer {
         for (MapRecord<String, String, String> record : claimed) {
             CouponIssueSyncEvent event = parse(record);
             issueGateway.compensate(event.couponId(), event.memberId());
+            // outbox: 실패 로그와 알림 큐잉이 recordFailure 안에서 같은 트랜잭션으로 처리된다.
             repository.recordFailure(
                     event.couponId(),
                     event.memberId(),
@@ -314,9 +342,9 @@ public class CouponIssueSyncConsumer {
 
         // saveBatch가 커밋까지 끝난 뒤에만 XACK한다 — 순서가 바뀌면 "ACK는 됐는데
         // 크래시로 DB엔 없는" 영구 유실이 생긴다. 여기서 예외를 안 잡는 이유도 같다:
-        // 실패하면 버퍼/PEL이 그대로 남아 다음 tick에 재시도된다.
-        List<CouponIssueSyncEvent> savedEvents = repository.saveBatch(couponId, events);
-        notifyIssueSuccess(savedEvents);
+        // 실패하면 버퍼/PEL이 그대로 남아 다음 tick에 재시도된다. 성공 알림 큐잉은
+        // saveBatch 안에서 같은 트랜잭션으로 처리된다(outbox).
+        repository.saveBatch(couponId, events);
 
         String[] recordIds = buffer.records.stream()
                 .map(record -> record.getId().getValue())
@@ -325,17 +353,6 @@ public class CouponIssueSyncConsumer {
 
         buffer.records.clear();
         buffer.deadline = null;
-    }
-
-    /**
-     * saveBatch가 커밋까지 끝낸(=실제로 새로 저장된) 이벤트에 대해서만 발급 성공
-     * 알림을 보낸다. 재전달돼 skip된 이벤트는 savedEvents에 없으므로 중복 알림이
-     * 안 나간다.
-     */
-    private void notifyIssueSuccess(List<CouponIssueSyncEvent> savedEvents) {
-        for (CouponIssueSyncEvent event : savedEvents) {
-            notificationSender.notifyMember(NotificationType.ISSUE_SUCCESS, event.couponId(), event.memberId());
-        }
     }
 
     /**

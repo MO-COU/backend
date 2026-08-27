@@ -11,6 +11,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import com.mocou.global.response.ApiResponse;
 
@@ -43,6 +44,14 @@ public class GlobalExceptionHandler {
         log.warn("[ValidationException] Message: {}", errorMessage);
         return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
                 .body(ApiResponse.error(ErrorCode.INVALID_INPUT, errorMessage));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnreadableMessageException(
+            HttpMessageNotReadableException exception) {
+        log.warn("[UnreadableMessageException] type={}", exception.getClass().getName());
+        return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+                .body(ApiResponse.error(ErrorCode.INVALID_INPUT));
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)

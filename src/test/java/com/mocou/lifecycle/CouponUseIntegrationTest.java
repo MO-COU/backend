@@ -1,12 +1,10 @@
 package com.mocou.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
-import com.mocou.notification.NotificationStatus;
 import com.mocou.notification.NotificationType;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -191,19 +189,24 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("알림 저장 실패는 커밋된 쿠폰 사용 결과에 영향을 주지 않는다")
-    void keepsCommittedUseWhenNotificationInsertFails() {
+    @DisplayName("알림 큐잉 실패는 이미 성공한 것처럼 보였던 사용 처리 전체를 롤백시킨다")
+    void rollsBackEntireUseWhenNotificationQueueingFails() {
         insertIssuedCoupon(ISSUE_ID);
+        // outbox: 알림 큐잉이 markUsed/saveUsedHistory와 같은 트랜잭션이라, 알림 insert가
+        // 실패하면 "결제/상태변경은 됐는데 알림만 실패"가 아니라 전체가 롤백돼야 한다 —
+        // 이게 이전(알림 실패를 격리하던) 동작과 의도적으로 달라진 부분이다.
         jdbcTemplate.execute(
                 "CREATE TRIGGER fail_used_notification BEFORE INSERT ON notification "
                         + "FOR EACH ROW SIGNAL SQLSTATE '45000' "
                         + "SET MESSAGE_TEXT = 'forced notification failure'");
 
-        assertThatCode(() -> service.use(ISSUE_ID, "notification-failure"))
-                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.use(ISSUE_ID, "notification-failure"))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.NOTIFICATION_QUEUE_FAILED));
 
-        assertThat(statusOf(ISSUE_ID)).isEqualTo("USED");
-        assertThat(usedHistoryCount(ISSUE_ID)).isEqualTo(1);
+        assertThat(statusOf(ISSUE_ID)).isEqualTo("ISSUED");
+        assertThat(usedHistoryCount(ISSUE_ID)).isZero();
         assertThat(usedNotificationCount()).isZero();
     }
 
@@ -261,12 +264,11 @@ class CouponUseIntegrationTest extends CouponLifecycleIntegrationTestSupport {
     private int usedNotificationCount() {
         return jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM notification "
-                        + "WHERE coupon_id = ? AND member_id = ? AND type = ? AND status = ?",
+                        + "WHERE coupon_id = ? AND member_id = ? AND type = ?",
                 Integer.class,
                 FIXTURE_COUPON_ID,
                 FIXTURE_MEMBER_ID,
-                NotificationType.USED.name(),
-                NotificationStatus.SENT.name());
+                NotificationType.USED.name());
     }
 
     @SafeVarargs

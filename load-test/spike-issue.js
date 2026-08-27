@@ -1,4 +1,4 @@
-// V1: 20,000 VU를 60초 동안 늘려 반복 요청함.
+// V2, V3: 같은 spike 방식으로 20,000명 또는 50,000명이 한 번씩 요청함.
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';
@@ -13,9 +13,6 @@ const usersStarted = new Counter('issue_users_started');
 
 const TARGET = __ENV.TARGET || 'http://localhost:8080';
 const COUPON_ID = __ENV.COUPON_ID || '301';
-const RAMP_UP = __ENV.RAMP_UP || '60s';
-const RAMP_STEP_SECONDS = 1;
-const HOLD = __ENV.HOLD || '10s';
 const VUS = Number(__ENV.VUS || '20000');
 const EXPECTED_STOCK = Number(__ENV.EXPECTED_STOCK || '10000');
 
@@ -23,37 +20,17 @@ if (!Number.isInteger(VUS) || VUS <= 0) throw new Error('VUS는 양의 정수여
 if (!Number.isInteger(EXPECTED_STOCK) || EXPECTED_STOCK < 0) throw new Error('EXPECTED_STOCK을 확인해주세요.');
 
 const expectedSuccess = Math.min(VUS, EXPECTED_STOCK);
-let started = false;
-
-function oneSecondRampStages(duration) {
-  const matched = /^(\d+)s$/.exec(duration);
-  if (!matched || Number(matched[1]) <= 0) {
-    throw new Error('RAMP_UP은 60s처럼 초 단위 양수로 입력해야 합니다.');
-  }
-  const totalSeconds = Number(matched[1]);
-  return Array.from({ length: Math.ceil(totalSeconds / RAMP_STEP_SECONDS) }, (_, index) => {
-    const elapsedSeconds = Math.min((index + 1) * RAMP_STEP_SECONDS, totalSeconds);
-    return {
-      duration: `${RAMP_STEP_SECONDS}s`,
-      target: Math.round((VUS * elapsedSeconds) / totalSeconds),
-    };
-  });
-}
+const expectedSoldOut = Math.max(VUS - EXPECTED_STOCK, 0);
 
 http.setResponseCallback(http.expectedStatuses(202, 409));
 
 export const options = {
   scenarios: {
-    rush: {
-      executor: 'ramping-vus',
-      startVUs: 0,
-      stages: [
-        // 1초마다 목표 VU 올림.
-        ...oneSecondRampStages(RAMP_UP),
-        // 마지막 VU 요청 시간 확보함.
-        { duration: HOLD, target: VUS },
-      ],
-      gracefulRampDown: '30s',
+    spike: {
+      executor: 'per-vu-iterations',
+      vus: VUS,
+      iterations: 1,
+      maxDuration: __ENV.MAX_DURATION || '2m',
     },
   },
   thresholds: {
@@ -62,8 +39,8 @@ export const options = {
     http_req_failed: ['rate<0.01'],
     checks: ['rate==1'],
     issue_success_202: [`count==${expectedSuccess}`],
-    issue_sold_out_409: ['count>0'],
-    issue_duplicate_409: ['count>0'],
+    issue_sold_out_409: [`count==${expectedSoldOut}`],
+    issue_duplicate_409: ['count==0'],
     issue_system_error_5xx: ['count==0'],
     issue_other_error: ['count==0'],
   },
@@ -86,20 +63,14 @@ function recordResponse(res) {
 }
 
 export default function () {
-  const vuId = exec.vu.idInTest;
-  if (!started) {
-    usersStarted.add(1);
-    started = true;
-  }
-
-  // 같은 회원 ID로 반복 요청함.
-  const memberId = Number(__ENV.MEMBER_ID_START || '1') + vuId - 1;
+  usersStarted.add(1);
+  const memberId = Number(__ENV.MEMBER_ID_START || '1') + exec.vu.idInTest - 1;
   const res = http.post(
     `${TARGET}/api/coupons/${COUPON_ID}/issues`,
     JSON.stringify({ memberId }),
     {
       headers: { 'Content-Type': 'application/json' },
-      tags: { name: 'flash-sale-issue' },
+      tags: { name: 'flash-sale-issue-spike' },
       timeout: __ENV.REQUEST_TIMEOUT || '10s',
     }
   );
