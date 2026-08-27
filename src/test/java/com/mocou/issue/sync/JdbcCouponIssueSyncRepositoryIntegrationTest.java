@@ -116,6 +116,32 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
         assertThat(pendingNotificationCount(COUPON_ID, MEMBER_ID_1, "ISSUE_FAILED")).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("재시도 한도 초과로 DLQ 이동을 기록할 때는 issue_failure_log만 남기고 알림은 큐잉하지 않는다")
+    void recordsRetryEscalationWithoutQueuingNotification() {
+        // given
+        insertCoupon(COUPON_ID, "OPEN");
+        insertMember(MEMBER_ID_1);
+
+        // when
+        repository.recordRetryEscalation(
+                COUPON_ID, MEMBER_ID_1, com.mocou.global.exception.ErrorCode.SYNC_RETRY_LIMIT_EXCEEDED, ISSUED_AT);
+
+        // then
+        // 아직 최종 실패가 아니라 DLQ 복구를 시도하는 중이므로, recordFailure와 달리
+        // 이 시점엔 회원에게 알리지 않는다.
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT COUNT(*) FROM issue_failure_log "
+                                        + "WHERE coupon_id = ? AND member_id = ? AND failure_reason = ?",
+                                Integer.class,
+                                COUPON_ID,
+                                MEMBER_ID_1,
+                                "SYNC_RETRY_LIMIT_EXCEEDED"))
+                .isEqualTo(1);
+        assertThat(pendingNotificationCount(COUPON_ID, MEMBER_ID_1, "ISSUE_FAILED")).isZero();
+    }
+
     private int pendingNotificationCount(long couponId, long memberId, String type) {
         return jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM notification "

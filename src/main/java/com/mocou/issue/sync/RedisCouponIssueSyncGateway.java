@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 public class RedisCouponIssueSyncGateway {
 
     public static final String GROUP_NAME = "coupon-issue-db-sync";
+    public static final String DLQ_GROUP_NAME = "coupon-issue-dlq-recovery";
 
     private static final String BUSY_GROUP_ERROR = "BUSYGROUP";
 
@@ -31,13 +32,23 @@ public class RedisCouponIssueSyncGateway {
      * 이벤트도 이후 XREADGROUP으로 읽을 수 있게 한다.
      */
     public CouponIssueSyncGroupResult ensureConsumerGroup(long couponId) {
-        String streamKey = CouponRedisKey.issueStream(couponId);
+        return ensureGroup(CouponRedisKey.issueStream(couponId), GROUP_NAME);
+    }
 
+    /**
+     * couponId에 해당하는 DLQ Stream에 복구용 Consumer Group을 생성한다.
+     * 메인 스트림용과 동일한 멱등 규칙을 따른다.
+     */
+    public CouponIssueSyncGroupResult ensureDlqConsumerGroup(long couponId) {
+        return ensureGroup(CouponRedisKey.issueDlqStream(couponId), DLQ_GROUP_NAME);
+    }
+
+    private CouponIssueSyncGroupResult ensureGroup(String streamKey, String groupName) {
         try {
             redisTemplate.opsForStream().createGroup(
                     streamKey,
                     ReadOffset.from("0"),
-                    GROUP_NAME);
+                    groupName);
 
             return CouponIssueSyncGroupResult.CREATED;
         } catch (RedisSystemException e) {
