@@ -58,6 +58,9 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
         assertThat(result.content().getFirst().memberEmail())
                 .isEqualTo("me*****@example.com");
         assertThat(result.content().getFirst().memberPhone()).isEqualTo("010-****-0002");
+        // Redis를 거치지 않고 직접 적재된 행이라 순번/잔여재고가 NULL로 남아야 한다(V11).
+        assertThat(result.content().getFirst().issueSequence()).isNull();
+        assertThat(result.content().getFirst().remainingAtIssue()).isNull();
     }
 
     @Test

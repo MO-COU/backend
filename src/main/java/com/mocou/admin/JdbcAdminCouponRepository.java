@@ -80,7 +80,7 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
                 "SELECT ci.coupon_issue_id, ci.coupon_id, ci.member_id, "
                         + "m.name AS member_name, m.email AS member_email, "
                         + "m.phone AS member_phone, ci.status, ci.issued_at, ci.used_at, "
-                        + "ci.expires_at FROM coupon_issue ci "
+                        + "ci.expires_at, ci.issue_sequence, ci.remaining_at_issue FROM coupon_issue ci "
                         + "JOIN member m ON m.member_id = ci.member_id "
                         + "WHERE ci.coupon_id = ? "
                         + "ORDER BY ci.issued_at DESC, ci.coupon_issue_id DESC LIMIT ? OFFSET ?",
@@ -95,7 +95,9 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
                                 resultSet.getString("status"),
                                 resultSet.getTimestamp("issued_at").toLocalDateTime(),
                                 toLocalDateTime(resultSet.getTimestamp("used_at")),
-                                resultSet.getTimestamp("expires_at").toLocalDateTime()),
+                                resultSet.getTimestamp("expires_at").toLocalDateTime(),
+                                resultSet.getObject("issue_sequence", Long.class),
+                                resultSet.getObject("remaining_at_issue", Long.class)),
                 couponId,
                 size,
                 offset);
