@@ -16,7 +16,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  *
  * <p>큐잉 트랜잭션이 커밋된 직후, 같은 호출에서 나온 알림들을 묶어 바로
  * {@link NotificationDispatchConsumer}에게 넘겨 즉시 발송을 시도한다 — 그래야 대부분의
- * 알림이 다음 폴링 tick(안전망, 기본 5초)까지 기다리지 않고 지연 없이 나간다.
+ * 알림이 다음 폴링 tick(안전망, 기본 10초)까지 기다리지 않고 지연 없이 나간다.
  * {@code mocou.notification.dispatch.enabled=false}라 디스패처 빈이 없으면 즉시 시도
  * 자체를 생략하고 PENDING으로만 남긴다.
  */

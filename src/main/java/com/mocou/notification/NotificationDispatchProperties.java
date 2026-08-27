@@ -21,9 +21,11 @@ public class NotificationDispatchProperties {
     private int batchSize = 100;
 
     // 이 값을 넘겨 재시도해도 계속 실패하면 더 이상 재시도하지 않고
-    // notification.status를 FAILED로 확정한다.
+    // notification.status를 FAILED로 확정한다. CouponIssueSyncProperties의 메인
+    // 스트림 재시도 한도와 맞춘 값이다 — 알림은 DLQ 같은 2단계 유예가 없어
+    // 발급 쪽의 "빠른 재시도" 계층에 맞춘다.
     @Min(1)
-    private int maxDeliveryCount = 5;
+    private int maxDeliveryCount = 3;
 
     public int getBatchSize() {
         return batchSize;

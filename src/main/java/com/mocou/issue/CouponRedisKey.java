@@ -46,6 +46,14 @@ public final class CouponRedisKey {
         return "coupon:{%d}:issue-sequence".formatted(couponId);
     }
 
+    /**
+     * 발급 동기화 재시도 한도를 넘긴 이벤트를 보관하는 DLQ Stream Key.
+     */
+    public static String issueDlqStream(long couponId) {
+        validateCouponId(couponId);
+        return "coupon:{%d}:issue-dlq".formatted(couponId);
+    }
+
     private static void validateCouponId(long couponId) {
         if (couponId <= 0) {
             throw new IllegalArgumentException("couponId는 양수여야 합니다.");

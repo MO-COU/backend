@@ -47,6 +47,9 @@ class RedisDbMismatchRule implements ConsistencyRule {
      */
     private static final String SYNC_GROUP = RedisCouponIssueSyncGateway.GROUP_NAME;
 
+    /** DLQ 복구 컨슈머가 만드는 그룹 이름. 이유는 위와 같다. */
+    private static final String DLQ_SYNC_GROUP = RedisCouponIssueSyncGateway.DLQ_GROUP_NAME;
+
     /**
      * 검사 대상 쿠폰. Redis 키는 발급을 여는 쿠폰에만 만들어지므로 DB에서 그 목록을 가져온다.
      *
@@ -119,18 +122,33 @@ class RedisDbMismatchRule implements ConsistencyRule {
                     .formatted(couponId, unprocessed);
         }
 
-        long unacknowledged = unacknowledgedCount(streamKey);
+        long unacknowledged = unacknowledgedCount(streamKey, SYNC_GROUP);
         if (unacknowledged > 0) {
             return "쿠폰 %d의 발급 이벤트 %d건이 컨슈머에서 처리 중이다. 동기화가 끝난 뒤 다시 검증해야 한다"
                     .formatted(couponId, unacknowledged);
+        }
+
+        // 메인 스트림이 비었어도 DLQ에서 아직 복구를 시도하는 중일 수 있다. 이 상태를 놓치면
+        // Redis(issuedMembers)엔 있는데 DB(coupon_issue)엔 아직 없는 정상적인 지연을
+        // "유실"로 오판(ISSUED_ONLY_IN_REDIS)한다.
+        String dlqStreamKey = CouponRedisKey.issueDlqStream(couponId);
+        Long dlqUnprocessed = redisTemplate.opsForStream().size(dlqStreamKey);
+        if (dlqUnprocessed != null && dlqUnprocessed > 0) {
+            return "쿠폰 %d의 발급 이벤트 %d건이 DLQ에서 아직 복구를 시도하는 중이다. 복구가 끝난 뒤 다시 검증해야 한다"
+                    .formatted(couponId, dlqUnprocessed);
+        }
+        long dlqUnacknowledged = unacknowledgedCount(dlqStreamKey, DLQ_SYNC_GROUP);
+        if (dlqUnacknowledged > 0) {
+            return "쿠폰 %d의 발급 이벤트 %d건이 DLQ 복구 컨슈머에서 처리 중이다. 복구가 끝난 뒤 다시 검증해야 한다"
+                    .formatted(couponId, dlqUnacknowledged);
         }
         return null;
     }
 
     /** 컨슈머 그룹이 아직 없으면 미확인 건도 없다. 그 경우까지 실패로 보지 않는다. */
-    private long unacknowledgedCount(String streamKey) {
+    private long unacknowledgedCount(String streamKey, String groupName) {
         try {
-            var pending = redisTemplate.opsForStream().pending(streamKey, SYNC_GROUP);
+            var pending = redisTemplate.opsForStream().pending(streamKey, groupName);
             return pending == null ? 0 : pending.getTotalPendingMessages();
         } catch (DataAccessException groupNotFound) {
             return 0;

@@ -9,26 +9,15 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.event.EventListener;
-import org.springframework.data.domain.Range;
 import org.springframework.data.redis.RedisSystemException;
-import org.springframework.data.redis.connection.RedisStreamCommands.XClaimOptions;
-import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
-import org.springframework.data.redis.connection.stream.PendingMessage;
 import org.springframework.data.redis.connection.stream.PendingMessages;
-import org.springframework.data.redis.connection.stream.ReadOffset;
-import org.springframework.data.redis.connection.stream.StreamOffset;
-import org.springframework.data.redis.connection.stream.StreamReadOptions;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.mocou.global.exception.ErrorCode;
 import com.mocou.issue.CouponRedisKey;
-import com.mocou.issue.RedisCouponIssueGateway;
 
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -47,8 +36,11 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>여러 쿠폰이 동시에 {@code OPEN} 상태일 수 있지만, 실제로 발급을 처리하는 것은
  * 항상 하나뿐이다(관리자가 하나씩 순차로 진행시키는 운영 절차). {@link #consume()}은
- * {@code activeCouponId} 하나만 폴링하며, 활성 쿠폰은 {@link #onSyncTargetChanged}로
- * 전환된다.
+ * {@link ActiveCouponIdHolder} 하나만 폴링하며, 활성 쿠폰 전환은 그 홀더가 담당한다.
+ *
+ * <p>재시도 한도(maxDeliveryCount)를 넘긴 이벤트는 여기서 바로 포기하지 않고
+ * {@link CouponIssueDlqRecoveryConsumer}가 다시 보는 DLQ로 옮긴다 — 최종 보상은
+ * 거기서 한 번 더 한도를 넘겼을 때만 일어난다.
  */
 @Slf4j
 @Component
@@ -62,11 +54,11 @@ public class CouponIssueSyncConsumer {
     private static final ZoneId COUPON_TIME_ZONE = ZoneId.of("Asia/Seoul");
     private static final String NO_GROUP_ERROR = "NOGROUP";
 
-    private final StringRedisTemplate redisTemplate;
     private final RedisCouponIssueSyncGateway syncGateway;
-    private final RedisCouponIssueGateway issueGateway;
     private final CouponIssueSyncRepository repository;
     private final CouponIssueSyncProperties properties;
+    private final RedisStreamGroupRecovery streamGroupRecovery;
+    private final ActiveCouponIdHolder activeCouponIdHolder;
 
     private final StreamBuffer buffer = new StreamBuffer();
     // ensureConsumerGroup을 이미 보장해준 couponId. 매 틱 부르면 낭비라 "바뀔 때만" 확인.
@@ -74,37 +66,14 @@ public class CouponIssueSyncConsumer {
     // XPENDING을 다시 확인해도 되는 시점. 매 틱마다 하면 낭비라 pendingCheckIntervalMs 간격으로 제한.
     private Instant nextPendingCheckAt = Instant.EPOCH;
     // 지금 실제로 폴링 중인 couponId. consume() 스레드(@Scheduled)에서만 읽고 쓰므로
-    // activeCouponId와 달리 volatile이 필요 없다 — 매 tick 이 값과 activeCouponId를
-    // 비교해서 대상이 바뀌었는지만 판단한다.
+    // ActiveCouponIdHolder의 값과 달리 volatile이 필요 없다 — 매 tick 이 값과 홀더의
+    // 값을 비교해서 대상이 바뀌었는지만 판단한다.
     private Long polledCouponId;
-    // "지금 활성화해야 할" couponId. 앱 기동 시 DB 조회로 한 번 정해지고, 이후로는
-    // CouponSyncTargetChangedEvent(발급을 시작시키는 API가 발행)를 받을 때만 바뀐다 —
-    // 매 틱(10ms) DB를 조회하면 그 자체가 병목이라서다. @Scheduled 스레드와 이벤트를
-    // 발행하는 쪽(API 요청 스레드)이 다를 수 있어 volatile로 가시성을 보장한다.
-    private volatile Long activeCouponId;
-
-    /** 빈이 뜰 때 한 번만 DB를 조회해 최초 활성 쿠폰을 정한다 — 그 이후는 이벤트로만 바뀐다. */
-    @PostConstruct
-    void initActiveCouponId() {
-        List<Long> openCouponIds = repository.findOpenCouponIds();
-        activeCouponId = openCouponIds.isEmpty() ? null : openCouponIds.getFirst();
-    }
-
-    /**
-     * 특정 쿠폰의 발급 처리를 실제로 시작시키는 쪽(예: 부하 테스트 시작 API)이 발행하는
-     * 이벤트를 받아 활성 쿠폰을 즉시 전환한다. DB를 다시 조회하지 않고 이벤트가 담아온
-     * couponId를 그대로 신뢰한다 — 여러 쿠폰이 동시에 OPEN이어도 실제로 처리할 하나는
-     * 이 이벤트가 정하기 때문이다.
-     */
-    @EventListener
-    void onSyncTargetChanged(CouponSyncTargetChangedEvent event) {
-        activeCouponId = event.couponId();
-    }
 
     // fixedDelay라 consume()은 절대 자기 자신과 동시에 두 번 안 돈다 — 상태 필드 동시성 걱정 없음.
     @Scheduled(fixedDelayString = "${mocou.issue.sync.poll-interval-ms:10}")
     public void consume() {
-        Long couponId = activeCouponId;
+        Long couponId = activeCouponIdHolder.get();
         if (couponId == null) {
             return;
         }
@@ -153,7 +122,7 @@ public class CouponIssueSyncConsumer {
         ensureConsumerGroup(couponId);
 
         try {
-            reclaimStalePendingEntries(streamKey);
+            reclaimStalePendingEntries(couponId, streamKey);
 
             int remaining = properties.getChunkSize() - buffer.records.size();
             if (remaining > 0) {
@@ -183,7 +152,7 @@ public class CouponIssueSyncConsumer {
     /**
      * XREADGROUP은 그룹이 없으면 NOGROUP 에러를 던지므로 미리 보장해둔다.
      *
-     * <p>{@code activeCouponId}는 더 이상 "DB 재조회로 최신화하는 캐시"가 아니라
+     * <p>활성 쿠폰은 더 이상 "DB 재조회로 최신화하는 캐시"가 아니라
      * {@code CouponSyncTargetChangedEvent}가 직접 전달한, 신뢰할 수 있는 전환 대상이라
      * 그룹 생성 직전에 DB를 다시 확인할 필요가 없다.
      */
@@ -208,11 +177,11 @@ public class CouponIssueSyncConsumer {
      *
      * <p>{@code totalDeliveryCount}(Redis가 직접 세는 누적 배달 횟수) 기준으로
      * 둘로 나눈다: {@code maxDeliveryCount} 이하면 아직 가망이 있다고 보고 버퍼에
-     * 합류시켜 3~9번의 일반 배치 로직(파싱→저장→XACK)을 그대로 재사용하고, 이미
-     * 처리된 건은 saveOne의 DuplicateKeyException skip이 걸러준다. 그 이상이면
-     * 포기하고 {@link #reclaimForCompensation}으로 보낸다.
+     * 합류시켜 일반 배치 로직(파싱→저장→XACK)을 그대로 재사용하고, 이미 처리된
+     * 건은 saveOne의 DuplicateKeyException skip이 걸러준다. 그 이상이면
+     * {@link #moveToDlq}로 보낸다.
      */
-    private void reclaimStalePendingEntries(String streamKey) {
+    private void reclaimStalePendingEntries(long couponId, String streamKey) {
         if (Instant.now().isBefore(nextPendingCheckAt)) {
             return;
         }
@@ -223,33 +192,16 @@ public class CouponIssueSyncConsumer {
             return;
         }
 
-        PendingMessages pending = redisTemplate.<String, String>opsForStream()
-                .pending(streamKey, GROUP_NAME, Range.unbounded(), room);
+        PendingMessages pending = streamGroupRecovery.pending(streamKey, GROUP_NAME, room);
         if (pending == null || pending.isEmpty()) {
             return;
         }
 
-        // pendingMinIdleMs보다 짧게 대기 중인 건 우리 자신의 버퍼가 아직 못
-        // 비운 정상적인 진행 중 항목일 수 있으므로 건드리지 않는다.
-        List<PendingMessage> stale = pending.stream()
-                .filter(message -> message.getElapsedTimeSinceLastDelivery().toMillis()
-                        >= properties.getPendingMinIdleMs())
-                .toList();
-        if (stale.isEmpty()) {
-            return;
-        }
+        PendingEntryClassifier.Result result = PendingEntryClassifier.classify(
+                pending.stream().toList(), properties.getPendingMinIdleMs(), properties.getMaxDeliveryCount());
 
-        List<String> retryableIds = stale.stream()
-                .filter(message -> message.getTotalDeliveryCount() <= properties.getMaxDeliveryCount())
-                .map(PendingMessage::getIdAsString)
-                .toList();
-        List<String> exhaustedIds = stale.stream()
-                .filter(message -> message.getTotalDeliveryCount() > properties.getMaxDeliveryCount())
-                .map(PendingMessage::getIdAsString)
-                .toList();
-
-        reclaimForRetry(streamKey, retryableIds);
-        reclaimForCompensation(streamKey, exhaustedIds);
+        reclaimForRetry(streamKey, result.retryableIds());
+        moveToDlq(couponId, streamKey, result.exhaustedIds());
     }
 
     /** 아직 재시도 한도 안쪽인 엔트리를 인수해 버퍼에 합류시킨다. */
@@ -266,46 +218,59 @@ public class CouponIssueSyncConsumer {
     }
 
     /**
-     * maxDeliveryCount를 넘겨 더 이상 재시도하지 않기로 포기한 엔트리를 처리한다
-     * (Issue #39 체크리스트 10번). 일반 배치(saveBatch)로는 절대 보내지 않고, 대신
-     * Redis 재고를 원복(compensate)한 뒤 issue_failure_log에 남기고 XACK+XDEL로
-     * 스트림에서 제거한다. compensate는 멱등(compensate-coupon.lua의 ZSCORE 가드)이라
-     * 이 메서드 도중 예외가 나 다음 tick에 그대로 재시도돼도 재고를 이중으로
-     * 원복하지 않는다.
+     * maxDeliveryCount를 넘겨 메인 스트림에서는 더 이상 재처리하지 않기로 한 엔트리를
+     * DLQ({@link CouponRedisKey#issueDlqStream(long)})로 옮긴다.
+     *
+     * <p>여기서는 Redis 재고를 보상하지 않는다 — 회원의 예약을 그대로 유지해야
+     * {@link CouponIssueDlqRecoveryConsumer}가 나중에 실제로 발급을 완성시킬 수 있고,
+     * 거기서마저 최종 한도(dlqMaxDeliveryCount)를 넘겼을 때 비로소 보상+실패 로그를
+     * 남긴다.
+     *
+     * <p>원본 이벤트의 필드를 그대로 옮기므로 DLQ 쪽 파싱 로직이 메인 스트림과
+     * 동일하다. XADD+XACK+XDEL을 Lua 스크립트 하나로 원자적으로 실행하므로(자세한
+     * 이유는 {@link RedisStreamGroupRecovery#moveEntries}), 앱이 중간에 죽어도
+     * DLQ에 중복으로 쌓이지 않는다. XADD는 스트림이 없으면 자동으로 만들어주므로
+     * DLQ 쪽 컨슈머 그룹이 아직 없어도 안전하다 — 그룹은 DLQ 복구 컨슈머가 자기
+     * 스케줄에서 필요할 때 만든다.
+     *
+     * <p>이동 자체는 Redis만으로 끝나야 한다 — 재시도가 실패하는 원인이 보통 DB
+     * 장애라서, {@code issue_failure_log} 기록을 이동보다 먼저 하거나 필수로 두면
+     * DB가 죽어있는 동안 DLQ로 넘어가는 것 자체가 막혀버린다. 그래서 이동이 끝난
+     * 뒤에 best-effort로만 기록한다 — 이 기록이 실패해도 이동 결과에는 영향이 없고,
+     * 단지 분석용 로그 한 줄이 빠질 뿐이다.
      */
-    private void reclaimForCompensation(String streamKey, List<String> ids) {
+    private void moveToDlq(long couponId, String streamKey, List<String> ids) {
         List<MapRecord<String, String, String>> claimed = claim(streamKey, ids);
         if (claimed.isEmpty()) {
             return;
         }
 
+        String dlqStreamKey = CouponRedisKey.issueDlqStream(couponId);
+        List<String> recordIds = claimed.stream()
+                .map(record -> record.getId().getValue())
+                .toList();
+        streamGroupRecovery.moveEntries(streamKey, dlqStreamKey, GROUP_NAME, recordIds);
+
         for (MapRecord<String, String, String> record : claimed) {
             CouponIssueSyncEvent event = parse(record);
-            issueGateway.compensate(event.couponId(), event.memberId());
-            // outbox: 실패 로그와 알림 큐잉이 recordFailure 안에서 같은 트랜잭션으로 처리된다.
-            repository.recordFailure(
-                    event.couponId(),
-                    event.memberId(),
-                    ErrorCode.INTERNAL_ERROR,
-                    LocalDateTime.now(COUPON_TIME_ZONE));
+            try {
+                repository.recordRetryEscalation(
+                        event.couponId(),
+                        event.memberId(),
+                        ErrorCode.SYNC_RETRY_LIMIT_EXCEEDED,
+                        LocalDateTime.now(COUPON_TIME_ZONE));
+            } catch (RuntimeException exception) {
+                log.warn(
+                        "DLQ 이동 기록(issue_failure_log)에 실패했다 — 이동 자체는 이미 끝났으므로 "
+                                + "재시도하지 않는다. couponId={}, memberId={}",
+                        event.couponId(), event.memberId(), exception);
+            }
         }
-
-        String[] recordIds = claimed.stream()
-                .map(record -> record.getId().getValue())
-                .toArray(String[]::new);
-        acknowledgeAndDelete(streamKey, recordIds);
     }
 
     private List<MapRecord<String, String, String>> claim(String streamKey, List<String> ids) {
-        if (ids.isEmpty()) {
-            return List.of();
-        }
-
-        List<MapRecord<String, String, String>> claimed = redisTemplate.<String, String>opsForStream()
-                .claim(streamKey, GROUP_NAME, CONSUMER_NAME,
-                        XClaimOptions.minIdle(Duration.ofMillis(properties.getPendingMinIdleMs()))
-                                .ids(ids));
-        return claimed == null ? List.of() : claimed;
+        return streamGroupRecovery.claim(
+                streamKey, GROUP_NAME, CONSUMER_NAME, properties.getPendingMinIdleMs(), ids);
     }
 
     /** block 시간을 "데드라인까지 남은 시간"으로 매번 재계산해야 데드라인에 정확히 깨어난다. */
@@ -314,16 +279,7 @@ public class CouponIssueSyncConsumer {
                 ? properties.getBatchWindowMs()
                 : Math.max(0, Duration.between(Instant.now(), buffer.deadline).toMillis());
 
-        StreamReadOptions options = StreamReadOptions.empty().count(remaining);
-        // BLOCK 0은 Redis 프로토콜상 "무한 대기"라 논블로킹과 다르다 — blockMs<=0이면 옵션 자체를 뺀다.
-        if (blockMs > 0) {
-            options = options.block(Duration.ofMillis(blockMs));
-        }
-
-        return redisTemplate.<String, String>opsForStream().read(
-                Consumer.from(GROUP_NAME, CONSUMER_NAME),
-                options,
-                StreamOffset.create(streamKey, ReadOffset.lastConsumed()));
+        return streamGroupRecovery.readNext(streamKey, GROUP_NAME, CONSUMER_NAME, remaining, blockMs);
     }
 
     /** "100건 또는 5초" 조건을 판정하고, 만족하면 DB 반영 + XACK까지 처리한다. */
@@ -363,8 +319,7 @@ public class CouponIssueSyncConsumer {
      * 바꿔야 한다.
      */
     private void acknowledgeAndDelete(String streamKey, String[] recordIds) {
-        redisTemplate.<String, String>opsForStream().acknowledge(streamKey, GROUP_NAME, recordIds);
-        redisTemplate.<String, String>opsForStream().delete(streamKey, recordIds);
+        streamGroupRecovery.acknowledgeAndDelete(streamKey, GROUP_NAME, recordIds);
     }
 
     private CouponIssueSyncEvent parse(MapRecord<String, String, String> record) {

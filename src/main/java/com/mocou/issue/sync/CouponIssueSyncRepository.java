@@ -40,9 +40,19 @@ public interface CouponIssueSyncRepository {
     List<CouponIssueSyncEvent> saveBatch(long couponId, List<CouponIssueSyncEvent> events);
 
     /**
-     * 재시도 한도(maxDeliveryCount)를 넘겨 더 이상 재처리하지 않기로 포기한 이벤트를
-     * {@code issue_failure_log}에 남긴다. Redis 재고 보상(compensate)과 짝을 이루는
-     * 호출로, 컨슈머는 이 저장소 호출 전에 이미 보상을 마친 상태다.
+     * DLQ 복구마저 자체 재시도 한도를 넘겨 더 이상 재처리하지 않기로 최종 포기한
+     * 이벤트를 {@code issue_failure_log}에 남기고 회원에게 실패 알림을 보낸다.
+     * Redis 재고 보상(compensate)과 짝을 이루는 호출로, 호출부는 이 저장소 호출
+     * 전에 이미 보상을 마친 상태다.
      */
     void recordFailure(long couponId, long memberId, ErrorCode failureReason, LocalDateTime occurredAt);
+
+    /**
+     * 메인 스트림 재시도 한도를 넘겨 DLQ로 넘어갔다는 사실만 {@code issue_failure_log}에
+     * 남긴다. {@link #recordFailure}와 달리 회원에게 알리지 않는다 — 아직 DLQ 복구를
+     * 시도하는 중이라 "발급 실패"라고 단정할 수 없기 때문이다. 같은 발급 건이
+     * 나중에 {@link #recordFailure}로 한 번 더(다른 failureReason으로) 기록될 수
+     * 있는데, 이건 의도한 중복이다 — 어느 단계까지 실패가 번졌는지 분석할 수 있다.
+     */
+    void recordRetryEscalation(long couponId, long memberId, ErrorCode reason, LocalDateTime occurredAt);
 }

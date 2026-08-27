@@ -44,9 +44,11 @@ public class LoadTestRedisReadinessValidator {
 
         Long issuedMembers = redisTemplate.opsForSet().size(CouponRedisKey.issuedMembers(couponId));
         Long streamLength = redisTemplate.opsForStream().size(CouponRedisKey.issueStream(couponId));
+        Long dlqStreamLength = redisTemplate.opsForStream().size(CouponRedisKey.issueDlqStream(couponId));
         Long resultCounts = redisTemplate.opsForHash().size(CouponRedisKey.issueResultCounts(couponId));
-        // 이전 실행 값이 남아 있으면 결과 비교 불가.
-        if (positive(issuedMembers) || positive(streamLength) || positive(resultCounts)) {
+        // 이전 실행 값이 남아 있으면 결과 비교 불가. DLQ에 이전 실행의 미복구 이벤트가 남아 있으면
+        // 이번 실행 도중 DLQ 복구 컨슈머가 그걸 건드려 결과가 오염된다.
+        if (positive(issuedMembers) || positive(streamLength) || positive(dlqStreamLength) || positive(resultCounts)) {
             throw notReady("이전 실행의 Redis 데이터가 남아 있습니다. 해당 회차를 초기화해 주세요");
         }
     }

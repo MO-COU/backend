@@ -196,6 +196,57 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
     }
 
     /**
+     * DLQ 스트림도 메인 스트림과 같은 이유로 지웠다가 그룹을 되살려야 한다 — 그래야
+     * 같은 couponId로 시작하는 다음 부하 테스트가 지난 회차의 DLQ 잔재를 물려받지 않는다.
+     */
+    @Test
+    @DisplayName("리셋 뒤 DLQ 스트림은 비워지고 복구 컨슈머 그룹은 다시 만들어진다")
+    void clearsDlqStreamAndRestoresDlqConsumerGroupAfterReset() {
+        // given - 지난 부하 테스트가 DLQ로 넘긴 이벤트가 남아 있는 상태를 재현
+        String dlqStreamKey = CouponRedisKey.issueDlqStream(DEMO_COUPON_ID);
+        redisTemplate.opsForStream().add(dlqStreamKey, Map.of("memberId", "5"));
+        redisTemplate
+                .opsForStream()
+                .createGroup(dlqStreamKey, ReadOffset.from("0"), RedisCouponIssueSyncGateway.DLQ_GROUP_NAME);
+
+        // when
+        resetService.reset(DEMO_COUPON_ID);
+
+        // then - 지난 회차의 유령 이벤트가 다음 부하 테스트로 넘어가면 안 된다
+        assertThat(redisTemplate.opsForStream().size(dlqStreamKey)).isZero();
+        assertThat(redisTemplate.opsForStream().groups(dlqStreamKey))
+                .anyMatch(group -> RedisCouponIssueSyncGateway.DLQ_GROUP_NAME.equals(group.groupName()));
+    }
+
+    /**
+     * DLQ에서 아직 복구를 시도하는 중인 발급도 "동기화 진행 중"이다 — 지금 리셋하면 복구가
+     * 성공했을 때 방금 지운 발급이 되살아난다.
+     */
+    @Test
+    @DisplayName("DLQ에서 재시도 중인 발급이 남아 있으면 거부한다")
+    void rejectsWhileDlqRecoveryIsInProgress() {
+        // given - DLQ 복구 컨슈머가 읽고 아직 XACK하지 않은 상황을 재현
+        String dlqStreamKey = CouponRedisKey.issueDlqStream(DEMO_COUPON_ID);
+        redisTemplate.opsForStream().add(dlqStreamKey, Map.of("memberId", "5"));
+        redisTemplate
+                .opsForStream()
+                .createGroup(dlqStreamKey, ReadOffset.from("0"), RedisCouponIssueSyncGateway.DLQ_GROUP_NAME);
+        redisTemplate
+                .opsForStream()
+                .read(
+                        Consumer.from(RedisCouponIssueSyncGateway.DLQ_GROUP_NAME, "test-recovery-consumer"),
+                        StreamOffset.create(dlqStreamKey, ReadOffset.lastConsumed()));
+
+        // when, then
+        assertThatThrownBy(() -> resetService.reset(DEMO_COUPON_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS);
+
+        assertThat(countIssues(DEMO_COUPON_ID)).isEqualTo(ISSUED_IN_LOAD_TEST);
+    }
+
+    /**
      * 지난 회차에는 검증 대상인 발급 300만 건이 들어 있다. 되돌리면 복구할 방법이 전체 재적재뿐이라 지정 자체를 막는다.
      *
      * <p>처음에는 파라미터를 받지 않고 {@code OPEN}인 쿠폰 하나를 서버가 찾는 방식이었다. 회차를 직접 만들 수 있게 되면서
