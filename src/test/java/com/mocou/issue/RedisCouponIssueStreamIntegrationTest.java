@@ -31,10 +31,7 @@ public class RedisCouponIssueStreamIntegrationTest
         assertThat(result)
                 .isEqualTo(CouponReservationResult.RESERVED);
         assertThat(currentStock()).isEqualTo("1");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isTrue();
+        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
 
         List<MapRecord<String, String, String>> events =
                 issueEvents();
@@ -53,11 +50,60 @@ public class RedisCouponIssueStreamIntegrationTest
                 .containsEntry(
                         "couponId",
                         Long.toString(COUPON_ID))
-                .containsEntry("memberId", "100");
+                .containsEntry("memberId", "100")
+                .containsEntry("issueSequence", "1");
 
         assertThat(Long.parseLong(
                 fields.get("reservedAtEpochSecond")))
                 .isPositive();
+    }
+
+    @Test
+    @DisplayName("Redis 전역 순번을 발급 회원별로 기록한다")
+    void recordsRedisGlobalSequences() {
+        setStock(3);
+
+        UUID firstEventId = UUID.randomUUID();
+        UUID secondEventId = UUID.randomUUID();
+        UUID thirdEventId = UUID.randomUUID();
+
+        gateway.reserveAndAppendEvent(
+                COUPON_ID,
+                9L,
+                firstEventId);
+        gateway.reserveAndAppendEvent(
+                COUPON_ID,
+                5L,
+                secondEventId);
+        gateway.reserveAndAppendEvent(
+                COUPON_ID,
+                1L,
+                thirdEventId);
+
+        assertThat(redisTemplate.opsForValue().get(
+                issueSequenceKey()))
+                .isEqualTo("3");
+
+        assertThat(redisTemplate.opsForZSet().score(
+                issuedMembersKey(),
+                "9"))
+                .isEqualTo(1.0);
+        assertThat(redisTemplate.opsForZSet().score(
+                issuedMembersKey(),
+                "5"))
+                .isEqualTo(2.0);
+        assertThat(redisTemplate.opsForZSet().score(
+                issuedMembersKey(),
+                "1"))
+                .isEqualTo(3.0);
+
+        List<MapRecord<String, String, String>> events =
+                issueEvents();
+
+        assertThat(events)
+                .extracting(event ->
+                        event.getValue().get("issueSequence"))
+                .containsExactly("1", "2", "3");
     }
 
     @Test
@@ -95,6 +141,12 @@ public class RedisCouponIssueStreamIntegrationTest
                 .containsEntry(
                         "eventId",
                         firstEventId.toString());
+        assertThat(redisTemplate.opsForValue().get(
+                issueSequenceKey()))
+                .isEqualTo("1");
+        assertThat(redisTemplate.opsForZSet().size(
+                issuedMembersKey()))
+                .isEqualTo(1L);
     }
 
     @Test
@@ -112,6 +164,10 @@ public class RedisCouponIssueStreamIntegrationTest
                 .isEqualTo(CouponReservationResult.SOLD_OUT);
         assertThat(currentStock()).isEqualTo("0");
         assertThat(redisTemplate.hasKey(issueStreamKey()))
+                .isFalse();
+        assertThat(redisTemplate.hasKey(issueSequenceKey()))
+                .isFalse();
+        assertThat(redisTemplate.hasKey(issuedMembersKey()))
                 .isFalse();
     }
 
@@ -133,12 +189,12 @@ public class RedisCouponIssueStreamIntegrationTest
         assertThat(result)
                 .isEqualTo(CouponReservationResult.NOT_OPEN_YET);
         assertThat(currentStock()).isEqualTo("2");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isFalse();
+        assertThat(issuedMemberScore(100L)).isNull();
         assertThat(redisTemplate.hasKey(issueStreamKey()))
                 .isFalse();
+        assertThat(redisTemplate.hasKey(issueSequenceKey()))
+                .isFalse();
+        assertThat(redisTemplate.hasKey(issuedMembersKey())).isFalse();
     }
 
     @Test
@@ -158,10 +214,7 @@ public class RedisCouponIssueStreamIntegrationTest
                 .isInstanceOf(DataAccessException.class);
 
         assertThat(currentStock()).isEqualTo("2");
-        assertThat(redisTemplate.opsForSet().isMember(
-                issuedMembersKey(),
-                "100"))
-                .isFalse();
+        assertThat(issuedMemberScore(100L)).isNull();
         assertThat(redisTemplate.opsForValue().get(
                 issueStreamKey()))
                 .isEqualTo("not-a-stream");
@@ -231,9 +284,52 @@ public class RedisCouponIssueStreamIntegrationTest
                 .isInstanceOf(DataAccessException.class);
 
         assertThat(currentStock()).isEqualTo("1");
-        assertThat(redisTemplate.opsForSet().isMember(
+        assertThat(issuedMemberScore(100L)).isNull();
+        assertThat(redisTemplate.hasKey(issueStreamKey()))
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("발급 순번 Key가 String이 아니면 예약 상태를 남기지 않는다")
+    void rejectsWrongIssueSequenceType() {
+        setStock(1);
+        redisTemplate.opsForHash().put(
+                issueSequenceKey(),
+                "invalid",
+                "value");
+
+        assertThatThrownBy(() ->
+                gateway.reserveAndAppendEvent(
+                        COUPON_ID,
+                        100L,
+                        UUID.randomUUID()))
+                .isInstanceOf(DataAccessException.class);
+
+        assertThat(currentStock()).isEqualTo("1");
+        assertThat(issuedMemberScore(100L)).isNull();
+        assertThat(redisTemplate.hasKey(issueStreamKey()))
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("발급 회원 Key가 Sorted Set이 아니면 예약 상태를 남기지 않는다")
+    void rejectsWrongIssuedMembersType() {
+        setStock(1);
+        redisTemplate.opsForValue().set(
                 issuedMembersKey(),
-                "100"))
+                "not-a-sorted-set");
+
+        assertThatThrownBy(() ->
+                gateway.reserveAndAppendEvent(
+                        COUPON_ID,
+                        100L,
+                        UUID.randomUUID()))
+                .isInstanceOf(DataAccessException.class);
+
+        assertThat(currentStock()).isEqualTo("1");
+        assertThat(redisTemplate.opsForValue().get(issuedMembersKey()))
+                .isEqualTo("not-a-sorted-set");
+        assertThat(redisTemplate.hasKey(issueSequenceKey()))
                 .isFalse();
         assertThat(redisTemplate.hasKey(issueStreamKey()))
                 .isFalse();

@@ -87,7 +87,8 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
                 TOTAL_QUANTITY - 2,
                 COUPON_ID);
 
-        redisTemplate.opsForSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "1", "2");
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "1", 1);
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "2", 2);
         redisTemplate.opsForValue().set(CouponRedisKey.stock(COUPON_ID), String.valueOf(TOTAL_QUANTITY - 2));
     }
 
@@ -118,7 +119,7 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
     @DisplayName("Redis에만 있는 발급자를 검출한다")
     void detectsMemberOnlyInRedis() {
         // given
-        redisTemplate.opsForSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "3");
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "3", 3);
 
         // when
         RuleOutcome outcome = outcome();

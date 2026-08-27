@@ -116,7 +116,8 @@ public class RedisCouponIssueGateway {
         return List.of(
                 CouponRedisKey.stock(couponId),
                 CouponRedisKey.issuedMembers(couponId),
-                CouponRedisKey.metadata(couponId));
+                CouponRedisKey.metadata(couponId),
+                CouponRedisKey.issueSequence(couponId));
     }
 
     private List<String> createReservationAndStreamKeys(long couponId) {
@@ -125,7 +126,8 @@ public class RedisCouponIssueGateway {
                 CouponRedisKey.issuedMembers(couponId),
                 CouponRedisKey.metadata(couponId),
                 CouponRedisKey.issueStream(couponId),
-                CouponRedisKey.issueResultCounts(couponId));
+                CouponRedisKey.issueResultCounts(couponId),
+                CouponRedisKey.issueSequence(couponId));
     }
 
     private List<String> createCompensationKeys(long couponId) {
