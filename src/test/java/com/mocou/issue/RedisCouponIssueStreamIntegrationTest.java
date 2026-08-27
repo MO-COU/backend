@@ -46,12 +46,13 @@ public class RedisCouponIssueStreamIntegrationTest
                 .containsEntry(
                         "eventType",
                         "COUPON_ISSUE_RESERVED")
-                .containsEntry("schemaVersion", "1")
+                .containsEntry("schemaVersion", "2")
                 .containsEntry(
                         "couponId",
                         Long.toString(COUPON_ID))
                 .containsEntry("memberId", "100")
-                .containsEntry("issueSequence", "1");
+                .containsEntry("issueSequence", "1")
+                .containsEntry("remainingAtIssue", "1");
 
         assertThat(Long.parseLong(
                 fields.get("reservedAtEpochSecond")))
@@ -59,8 +60,8 @@ public class RedisCouponIssueStreamIntegrationTest
     }
 
     @Test
-    @DisplayName("Redis 전역 순번을 발급 회원별로 기록한다")
-    void recordsRedisGlobalSequences() {
+    @DisplayName("Redis 전역 순번과 예약 시점 잔여 재고를 Stream에 기록한다")
+    void recordsRedisGlobalSequencesAndRemainingStock() {
         setStock(3);
 
         UUID firstEventId = UUID.randomUUID();
@@ -104,6 +105,21 @@ public class RedisCouponIssueStreamIntegrationTest
                 .extracting(event ->
                         event.getValue().get("issueSequence"))
                 .containsExactly("1", "2", "3");
+
+        assertThat(events)
+                .extracting(event ->
+                        event.getValue().get("remainingAtIssue"))
+                .containsExactly("2", "1", "0");
+
+        assertThat(events)
+        .allSatisfy(event -> {
+            Map<String, String> fields = event.getValue();
+
+            long issueSequence = Long.parseLong(fields.get("issueSequence"));
+            long remainingAtIssue = Long.parseLong(fields.get("remainingAtIssue"));
+
+            assertThat(issueSequence + remainingAtIssue).isEqualTo(3);
+        });
     }
 
     @Test

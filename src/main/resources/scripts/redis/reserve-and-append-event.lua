@@ -168,7 +168,7 @@ if streamType ~= 'none' and streamType ~= 'stream' then
 end
 
 -- Redis 재고 차감
-redis.call('DECR', KEYS[1])
+local remainingAtIssue = redis.call('DECR', KEYS[1])
 
 -- 모든 Spring 인스턴스가 공유하는 Redis Lua 예약 성공 순번
 local issueSequenceResult = redis.pcall(
@@ -221,13 +221,15 @@ local streamEntryId = redis.pcall(
     'eventType',
     'COUPON_ISSUE_RESERVED',
     'schemaVersion',
-    '1',
+    '2',
     'couponId',
     ARGV[3],
     'memberId',
     ARGV[1],
     'issueSequence',
     tostring(issueSequence),
+    'remainingAtIssue',
+    tostring(remainingAtIssue),
     'reservedAtEpochSecond',
     redisTime[1]
 )
