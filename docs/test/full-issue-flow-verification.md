@@ -172,7 +172,7 @@ MODE=v1-ramp-20000 COUPON_ID=301 VUS=20000 RAMP_UP=60s EXPECTED_STOCK=10000 \
 예를 들어 최초 재고가 10,000장이고 DB에 발급이 8,000건 저장됐다면 DB와 Redis의 잔여 재고는 모두 2,000이어야 한다.
 세 비교 중 하나라도 다르면 스크립트가 `FAIL`을 출력하고 실패 상태로 종료한다.
 
-`verify-issue-result.sql`은 k6 직후 빠르게 확인하는 쿠폰 단위 사전 점검이다. 공식 최종 정합성 판정은 [B1 정합성 검증 규칙 명세](../b1/consistency-rules.md)의 R1~R7 실행 결과를 사용한다.
+`verify-issue-result.sql`은 k6 직후 빠르게 확인하는 쿠폰 단위 사전 점검이다. 공식 최종 정합성 판정은 [B1 정합성 검증 규칙 명세](../b1/consistency-rules.md)의 규칙 실행 결과를 사용한다. 규칙 목록은 그 문서 한 곳에서만 관리하므로 여기에 옮겨 적지 않는다.
 
 실행 결과 파일명에 쓰는 `TEST_LABEL`은 사람이 결과를 구분하기 위한 문자열이다. `coupon_issue_run.run_id`나 `verification_run.run_id`와 같은 DB 숫자 식별자가 아니다.
 
