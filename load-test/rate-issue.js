@@ -1,3 +1,4 @@
+// V5: 초당 4,000건씩 5초 동안 요청함.
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';
@@ -97,6 +98,6 @@ export function handleSummary(data) {
   };
   return {
     stdout: `MOCOU_RESULT=${JSON.stringify(result)}\n`,
-    [__ENV.SUMMARY_FILE || 'summary.json']: JSON.stringify(data),
+    [__ENV.SUMMARY_FILE || 'summary.json']: JSON.stringify(result),
   };
 }

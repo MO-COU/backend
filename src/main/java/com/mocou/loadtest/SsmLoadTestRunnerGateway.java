@@ -140,12 +140,14 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
         }
     }
 
-    private String buildCommand(long runId, LoadTestStartRequest request) {
+    String buildCommand(long runId, LoadTestStartRequest request) {
         LoadTestScenario scenario = request.scenario();
+        String summaryFile = "/tmp/mocou-run-" + runId + "-summary.json";
+        String logFile = "/tmp/mocou-run-" + runId + "-k6.log";
         return "cd "
                 + shellQuote(properties.workDirectory())
                 + " && SUMMARY_FILE="
-                + shellQuote("/tmp/mocou-run-" + runId + "-summary.json")
+                + shellQuote(summaryFile)
                 + " TARGET="
                 + shellQuote(properties.targetUrl())
                 + " COUPON_ID="
@@ -157,7 +159,20 @@ public class SsmLoadTestRunnerGateway implements LoadTestRunnerGateway {
                 + " EXPECTED_STOCK="
                 + scenario.expectedStock()
                 + " k6 run --quiet "
-                + shellQuote(scenario.scriptPath());
+                + shellQuote(scenario.scriptPath())
+                + " > "
+                + shellQuote(logFile)
+                + " 2>&1; K6_EXIT=$?; "
+                + "if [ -s "
+                + shellQuote(summaryFile)
+                + " ]; then printf '"
+                + RESULT_PREFIX
+                + "'; cat "
+                + shellQuote(summaryFile)
+                + "; printf '\\n'; exit 0; "
+                + "else tail -c 8000 "
+                + shellQuote(logFile)
+                + " >&2; exit $K6_EXIT; fi";
     }
 
     private String shellQuote(String value) {
