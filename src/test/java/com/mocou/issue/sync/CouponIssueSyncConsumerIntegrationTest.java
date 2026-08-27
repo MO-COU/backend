@@ -19,7 +19,6 @@ import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 
-import com.mocou.coupon.CouponStatusChangedEvent;
 import com.mocou.global.exception.ErrorCode;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -53,7 +52,7 @@ class CouponIssueSyncConsumerIntegrationTest
         CouponIssueSyncConsumer consumer =
                 new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.initOpenCouponIds();
+        consumer.initActiveCouponId();
 
         addEvent("event-1", 100L, 1L);
         addEvent("event-2", 101L, 2L);
@@ -81,7 +80,7 @@ class CouponIssueSyncConsumerIntegrationTest
         CouponIssueSyncConsumer consumer =
                 new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.initOpenCouponIds();
+        consumer.initActiveCouponId();
 
         addEvent("event-1", 100L, 1L);
         addEvent("event-2", 101L, 2L);
@@ -115,7 +114,7 @@ class CouponIssueSyncConsumerIntegrationTest
         CouponIssueSyncConsumer consumer =
                 new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.initOpenCouponIds();
+        consumer.initActiveCouponId();
 
         gateway.ensureConsumerGroup(COUPON_ID);
         addEvent("event-1", 100L, 1L);
@@ -152,7 +151,7 @@ class CouponIssueSyncConsumerIntegrationTest
         CouponIssueSyncConsumer consumer =
                 new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.initOpenCouponIds();
+        consumer.initActiveCouponId();
 
         gateway.ensureConsumerGroup(COUPON_ID);
         // reserveAndAppendEvent가 실제로 남기는 상태(재고 차감 + 발급 회원 등록)를
@@ -198,7 +197,7 @@ class CouponIssueSyncConsumerIntegrationTest
         CouponIssueSyncConsumer consumer =
                 new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.initOpenCouponIds();
+        consumer.initActiveCouponId();
 
         addEvent("event-1", 100L, 1L);
 
@@ -221,7 +220,7 @@ class CouponIssueSyncConsumerIntegrationTest
         CouponIssueSyncConsumer consumer = new CouponIssueSyncConsumer(
                 redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.initOpenCouponIds();
+        consumer.initActiveCouponId();
         given(repository.saveBatch(anyLong(), anyList()))
                 .willAnswer(invocation -> invocation.getArgument(1));
 
@@ -249,22 +248,23 @@ class CouponIssueSyncConsumerIntegrationTest
         assertThat(captor.getAllValues())
                 .extracting(list -> list.getFirst().memberId())
                 .containsExactly(100L, 101L);
-        // initOpenCouponIds() 1회 + 최초 그룹 생성 1회 + 복구 시 그룹 재생성 1회 = 3회.
-        // openCouponIds 캐시가 이벤트 유실 등으로 stale해졌을 가능성까지 이 순간에 같이 회복한다.
-        verify(repository, times(3)).findOpenCouponIds();
+        // initActiveCouponId()에서 딱 1회 조회한 뒤로는 DB를 다시 조회하지 않는다 —
+        // 그룹 재생성은 activeCouponId(이벤트로만 바뀌는 값)를 그대로 신뢰하고 진행한다.
+        verify(repository, times(1)).findOpenCouponIds();
     }
 
-    // 그룹 생성 시점(최초 1회)에 한 번 더 조회하는 건 의도한 동작이다 - 그룹이 실제로
-    // 캐시 밖에서 다시 만들어지지 않는 이상, 매 tick DB를 두드리진 않는다는 게 이 테스트의 핵심.
+    // 그룹을 다시 만들어야 하는 상황(캐시 무효화 등)에서도 DB를 추가로 조회하지 않는 것이
+    // 이 테스트의 핵심 — activeCouponId는 이벤트로만 바뀌는 값이라 그룹 생성 시점에
+    // 다시 확인할 필요가 없다.
     @Test
-    @DisplayName("consume()를 여러 번 호출해도 그룹 생성 이후엔 open 쿠폰 목록을 추가로 조회하지 않는다")
+    @DisplayName("consume()를 여러 번 호출해도 최초 조회 이후엔 open 쿠폰 목록을 추가로 조회하지 않는다")
     void queriesOpenCouponIdsOnlyOnceAcrossMultipleConsumeCalls() {
         // given
         CouponIssueSyncProperties properties = properties(100, 5_000);
         CouponIssueSyncConsumer consumer =
                 new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.initOpenCouponIds();
+        consumer.initActiveCouponId();
 
         // when
         // 10ms 간격으로 반복 호출되는 실제 상황을 재현 — 그룹이 이미 있으면 매번 DB를 조회하면 안 된다.
@@ -273,19 +273,19 @@ class CouponIssueSyncConsumerIntegrationTest
         consumer.consume();
 
         // then
-        // initOpenCouponIds()에서 1번 + 최초 그룹 생성 시점에 1번, 이후로는 추가 조회 없음.
-        verify(repository, times(2)).findOpenCouponIds();
+        // initActiveCouponId()에서 1번뿐, 이후로는 추가 조회 없음.
+        verify(repository, times(1)).findOpenCouponIds();
     }
 
     @Test
-    @DisplayName("CouponStatusChangedEvent를 받으면 open 쿠폰 목록을 다시 조회해 반영한다")
-    void refreshesOpenCouponIdsOnStatusChangedEvent() {
+    @DisplayName("CouponSyncTargetChangedEvent를 받으면 DB 조회 없이 즉시 활성 쿠폰을 전환한다")
+    void switchesActiveCouponImmediatelyOnSyncTargetChangedEvent() {
         // given
         CouponIssueSyncProperties properties = properties(1, 5_000);
         CouponIssueSyncConsumer consumer =
                 new CouponIssueSyncConsumer(redisTemplate, gateway, issueGateway, repository, properties);
         given(repository.findOpenCouponIds()).willReturn(List.of());
-        consumer.initOpenCouponIds();
+        consumer.initActiveCouponId();
         given(repository.saveBatch(anyLong(), anyList()))
                 .willAnswer(invocation -> invocation.getArgument(1));
 
@@ -294,13 +294,15 @@ class CouponIssueSyncConsumerIntegrationTest
         verify(repository, never()).saveBatch(anyLong(), anyList());
 
         // when
-        // 관리자 API가 쿠폰을 OPEN으로 바꾸고 이벤트를 발행했다고 가정한다.
-        given(repository.findOpenCouponIds()).willReturn(List.of(COUPON_ID));
-        consumer.onCouponStatusChanged(new CouponStatusChangedEvent(COUPON_ID));
+        // 부하 테스트 시작 등 발급 처리를 실제로 시작시키는 쪽이 이 이벤트를 발행했다고 가정한다.
+        consumer.onSyncTargetChanged(new CouponSyncTargetChangedEvent(COUPON_ID));
         consumer.consume();
 
         // then
         verify(repository).saveBatch(eq(COUPON_ID), anyList());
+        // 이벤트는 couponId를 그대로 신뢰하므로 전환을 위해 DB를 다시 조회하지 않는다 —
+        // initActiveCouponId()에서의 1번뿐.
+        verify(repository, times(1)).findOpenCouponIds();
     }
 
     private void awaitPendingMinIdle() {
