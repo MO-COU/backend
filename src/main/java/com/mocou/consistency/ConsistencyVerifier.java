@@ -15,6 +15,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.stereotype.Component;
 
+import com.mocou.global.logging.SafeExceptionLog;
+
 /**
  * 검증 한 번을 실행하고 결과를 남긴다.
  *
@@ -90,7 +92,11 @@ public class ConsistencyVerifier {
                     result.outcomes().size(),
                     result.outcomes().stream().mapToLong(RuleOutcome::violationCount).sum());
         } catch (RuntimeException e) {
-            log.error("정합성 검증이 규칙을 돌리지 못하고 끝났다 (run {})", runId, e);
+            log.error(
+                    "정합성 검증이 규칙을 돌리지 못하고 끝났다 (run {}, errorTypes={})\n{}",
+                    runId,
+                    SafeExceptionLog.typeChain(e),
+                    SafeExceptionLog.stackFrames(e));
             repository.failRun(runId, LocalDateTime.now());
         }
     }
@@ -143,7 +149,11 @@ public class ConsistencyVerifier {
             try {
                 outcomes.add(rule.check(jdbcTemplate, context));
             } catch (RuntimeException e) {
-                log.error("검증 규칙 {} 실행 실패", rule.rule(), e);
+                log.error(
+                        "검증 규칙 {} 실행 실패 (errorTypes={})\n{}",
+                        rule.rule(),
+                        SafeExceptionLog.typeChain(e),
+                        SafeExceptionLog.stackFrames(e));
                 outcomes.add(RuleOutcome.failed(rule.rule(), describe(e)));
             }
         }
