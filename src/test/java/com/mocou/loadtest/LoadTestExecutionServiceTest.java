@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
+import com.mocou.issue.sync.CouponSyncTargetChangedEvent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class LoadTestExecutionServiceTest {
@@ -16,6 +18,7 @@ class LoadTestExecutionServiceTest {
     @Mock private LoadTestRunnerGateway runnerGateway;
     @Mock private LoadTestRunRepository repository;
     @Mock private LoadTestRedisReadinessValidator redisReadinessValidator;
+    @Mock private ApplicationEventPublisher eventPublisher;
     @InjectMocks private LoadTestExecutionService service;
 
     @Test
@@ -31,6 +34,7 @@ class LoadTestExecutionServiceTest {
         assertThat(actual).isEqualTo(expected);
         verify(repository).validateCouponReady(301L, 10_000);
         verify(redisReadinessValidator).validate(301L, 10_000);
+        verify(eventPublisher).publishEvent(new CouponSyncTargetChangedEvent(301L));
         verify(runnerGateway).start(77L, request);
     }
 
