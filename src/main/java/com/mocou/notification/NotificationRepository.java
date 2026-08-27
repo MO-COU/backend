@@ -27,6 +27,9 @@ public interface NotificationRepository {
     /** outbox: 아직 발송 안 된(PENDING) 알림을 오래된 순으로 가져온다. */
     List<PendingNotification> findPending(int limit);
 
+    /** 관리자 화면에 보여줄 회차별 발급 성공 알림 처리 상태를 집계한다. */
+    NotificationStatusCounts countIssueSuccessByCouponId(long couponId);
+
     /** 발송에 성공한 알림들을 한 번에 SENT로 확정한다. {@code notificationIds}가 비어 있으면 아무 것도 하지 않는다. */
     void markSentBatch(List<Long> notificationIds, LocalDateTime sentAt);
 

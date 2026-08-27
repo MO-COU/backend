@@ -134,6 +134,23 @@ class AdminCouponControllerTest {
     }
 
     @Test
+    @DisplayName("알림 처리 현황을 공통 응답 형식으로 반환한다")
+    void returnsNotificationCounts() throws Exception {
+        given(service.getNotificationCounts(COUPON_ID))
+                .willReturn(new AdminCouponNotificationCounts(COUPON_ID, 10_000, 9_900, 90, 10));
+
+        mockMvc.perform(
+                        get("/api/admin/coupons/{couponId}/notification-counts", COUPON_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.couponId").value(COUPON_ID))
+                .andExpect(jsonPath("$.data.totalCount").value(10_000))
+                .andExpect(jsonPath("$.data.sentCount").value(9_900))
+                .andExpect(jsonPath("$.data.pendingCount").value(90))
+                .andExpect(jsonPath("$.data.failedCount").value(10));
+    }
+
+    @Test
     @DisplayName("존재하지 않는 쿠폰은 공통 404 응답을 반환한다")
     void returnsNotFoundForMissingCoupon() throws Exception {
         given(service.getStock(COUPON_ID))
