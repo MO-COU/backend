@@ -34,7 +34,7 @@ class HistoryChainRule implements ConsistencyRule {
      * @param violationCountSql 전체 위반 수. 상세와 같은 기준으로 세야 둘이 어긋나지 않는다
      * @param violationSql 상세. {@code ORDER BY}와 {@code :limit}을 반드시 포함한다
      */
-    private record ChainCheck(
+    record ChainCheck(
             String checkedSql,
             String violationCountSql,
             String violationSql,
@@ -133,38 +133,55 @@ class HistoryChainRule implements ConsistencyRule {
     /**
      * 이웃한 두 이력이 이어지는지 본다. 앞 이력의 도착 상태가 다음 이력의 출발 상태여야 한다.
      *
-     * <p>{@code LAG}가 정렬된 결과를 훑으며 직전 행의 값을 가져온다. 서브쿼리로 매번 앞 행을 다시 찾으면 이력 600만 행마다 탐색이
-     * 일어난다. {@code PARTITION BY}가 발급 건마다 칸막이를 쳐서 다른 발급 건의 이력과 이어지지 않게 한다.
+     * <p>{@code LATERAL}이 이력 한 줄마다 직전 한 건만 집어온다. 바깥 행({@code h})의 값을 안쪽에서 참조할 수 있어
+     * "이 줄 기준 직전"을 물을 수 있고, {@code LIMIT 1}이 붙어 실제로 읽는 양이 발급 건당 이력 수로 묶인다.
+     *
+     * <p>원래는 {@code LAG}였다. 이력 600만 행마다 탐색이 일어나는 것을 피하려는 선택이었는데, 실행 계획을 떠 보니
+     * 판단 근거가 우리 데이터와 맞지 않았다. {@code LAG}는 전체 행을 정렬한 뒤 버퍼에 쌓아두고 계산하므로
+     * ({@code Window aggregate with buffering}) 그 단계 하나가 전체의 70% 이상을 차지했다.
+     * 정렬 순서와 똑같은 인덱스를 만들어 줘도 윈도우 함수는 정렬을 생략하지 못해 시간이 그대로였다.
+     * 반면 여기서 말하는 "탐색"은 발급 건당 이력이 평균 두 줄이라 매우 얕고,
+     * {@code uk_history_issue_idempotency}의 선두 컬럼이 {@code coupon_issue_id}여서 인덱스도 그대로 탄다.
+     *
+     * <p>정렬 기준은 원래와 같다. {@code changed_at}이 같은 이력이 있으면 어느 쪽이 직전인지 실행마다 달라지므로
+     * {@code history_id}로 한 번 더 가른다. 방향만 뒤집어 {@code LIMIT 1}이 직전 한 건을 집게 했다.
+     *
+     * <p>발급 건의 첫 이력은 직전이 없다. {@code LAG}는 {@code NULL}을 돌려주어 {@code IS NOT NULL}로 걸러냈지만,
+     * 여기서는 안쪽이 빈 결과라 조인에서 그 행 자체가 빠진다. 도달하는 결과는 같고 방식만 다르다.
      *
      * <p>대상이 발급 건이 아니라 이력 행이다. 어느 줄에서 끊겼는지가 조사의 출발점이다.
      */
-    private static final ChainCheck BROKEN_CHAIN =
+    static final ChainCheck BROKEN_CHAIN =
             new ChainCheck(
                     HISTORY_COUNT_SQL,
                     """
-                    WITH chain AS (
-                        SELECT from_status,
-                               LAG(to_status) OVER (
-                                   PARTITION BY coupon_issue_id
-                                   ORDER BY changed_at, history_id
-                               ) AS prev_to_status
-                        FROM coupon_issue_history
-                    )
-                    SELECT COUNT(*) FROM chain
-                    WHERE prev_to_status IS NOT NULL AND prev_to_status <> from_status
+                    SELECT COUNT(*)
+                    FROM coupon_issue_history h
+                    JOIN LATERAL (
+                        SELECT p.to_status
+                        FROM coupon_issue_history p
+                        WHERE p.coupon_issue_id = h.coupon_issue_id
+                          AND (p.changed_at < h.changed_at
+                               OR (p.changed_at = h.changed_at AND p.history_id < h.history_id))
+                        ORDER BY p.changed_at DESC, p.history_id DESC
+                        LIMIT 1
+                    ) prev ON TRUE
+                    WHERE prev.to_status <> h.from_status
                     """,
                     """
-                    WITH chain AS (
-                        SELECT history_id, from_status,
-                               LAG(to_status) OVER (
-                                   PARTITION BY coupon_issue_id
-                                   ORDER BY changed_at, history_id
-                               ) AS prev_to_status
-                        FROM coupon_issue_history
-                    )
-                    SELECT history_id, prev_to_status, from_status FROM chain
-                    WHERE prev_to_status IS NOT NULL AND prev_to_status <> from_status
-                    ORDER BY history_id
+                    SELECT h.history_id, prev.to_status AS prev_to_status, h.from_status
+                    FROM coupon_issue_history h
+                    JOIN LATERAL (
+                        SELECT p.to_status
+                        FROM coupon_issue_history p
+                        WHERE p.coupon_issue_id = h.coupon_issue_id
+                          AND (p.changed_at < h.changed_at
+                               OR (p.changed_at = h.changed_at AND p.history_id < h.history_id))
+                        ORDER BY p.changed_at DESC, p.history_id DESC
+                        LIMIT 1
+                    ) prev ON TRUE
+                    WHERE prev.to_status <> h.from_status
+                    ORDER BY h.history_id
                     LIMIT :limit
                     """,
                     (rs, rowNum) ->
