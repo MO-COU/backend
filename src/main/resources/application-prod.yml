@@ -23,3 +23,9 @@ mocou:
       # 기본값 false. local 프로필엔 절대 넣지 않음.
       # 꺼진 채로 배포하면 발급이 Redis에만 쌓이고 DB로 절대 안 넘어간다.
       enabled: true
+  notification:
+    dispatch:
+      # 기본값 false. local 프로필엔 절대 넣지 않음.
+      # 꺼진 채로 배포하면 알림이 notification 테이블에 PENDING으로만 쌓이고 발송되지 않는다.
+      # created_at 나이 필터로 즉시 발송 경로와의 이중 발송 경쟁 상태를 막아둔 뒤에만 켠다.
+      enabled: true
