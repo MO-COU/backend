@@ -80,11 +80,11 @@ public class JdbcNotificationRepository implements NotificationRepository {
     }
 
     @Override
-    public List<PendingNotification> findPending(int limit) {
+    public List<PendingNotification> findPending(int limit, LocalDateTime createdBefore) {
         try {
             return jdbcTemplate.query(
                     "SELECT notification_id, coupon_id, member_id, type, retry_count "
-                            + "FROM notification WHERE status = 'PENDING' "
+                            + "FROM notification WHERE status = 'PENDING' AND created_at <= ? "
                             + "ORDER BY notification_id LIMIT ?",
                     (rs, rowNum) ->
                             new PendingNotification(
@@ -93,6 +93,7 @@ public class JdbcNotificationRepository implements NotificationRepository {
                                     (Long) rs.getObject("member_id"),
                                     NotificationType.valueOf(rs.getString("type")),
                                     rs.getInt("retry_count")),
+                    Timestamp.valueOf(createdBefore),
                     limit);
         } catch (DataAccessException e) {
             log.error("PENDING 알림 조회에 실패했습니다.", e);

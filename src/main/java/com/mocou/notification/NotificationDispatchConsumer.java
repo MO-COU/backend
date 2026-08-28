@@ -45,7 +45,8 @@ public class NotificationDispatchConsumer {
     /** 안전망 경로 - 즉시 경로가 놓친 PENDING row를 늦게라도 훑어서 처리한다. */
     @Scheduled(fixedDelayString = "${mocou.notification.dispatch.poll-interval-ms:10000}")
     public void dispatch() {
-        processBatch(notificationRepository.findPending(properties.getBatchSize()));
+        LocalDateTime createdBefore = LocalDateTime.now().minusSeconds(properties.getMinDispatchAgeSeconds());
+        processBatch(notificationRepository.findPending(properties.getBatchSize(), createdBefore));
     }
 
     /**

@@ -91,7 +91,9 @@ class AdminCouponServiceTest {
                         "ISSUED",
                         LocalDateTime.of(2026, 8, 19, 10, 0),
                         null,
-                        LocalDateTime.of(2026, 8, 26, 10, 0));
+                        LocalDateTime.of(2026, 8, 26, 10, 0),
+                        5L,
+                        95L);
         given(repository.existsCoupon(COUPON_ID)).willReturn(true);
         given(repository.countIssues(COUPON_ID)).willReturn(21L);
         given(repository.findIssues(COUPON_ID, 20, 0L)).willReturn(List.of(issue));

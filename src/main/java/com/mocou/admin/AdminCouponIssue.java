@@ -13,7 +13,9 @@ public record AdminCouponIssue(
         String status,
         LocalDateTime issuedAt,
         LocalDateTime usedAt,
-        LocalDateTime expiresAt) {
+        LocalDateTime expiresAt,
+        Long issueSequence,
+        Long remainingAtIssue) {
 
     public static AdminCouponIssue withMaskedMember(
             long issueId,
@@ -25,7 +27,9 @@ public record AdminCouponIssue(
             String status,
             LocalDateTime issuedAt,
             LocalDateTime usedAt,
-            LocalDateTime expiresAt) {
+            LocalDateTime expiresAt,
+            Long issueSequence,
+            Long remainingAtIssue) {
         return new AdminCouponIssue(
                 issueId,
                 couponId,
@@ -36,6 +40,8 @@ public record AdminCouponIssue(
                 status,
                 issuedAt,
                 usedAt,
-                expiresAt);
+                expiresAt,
+                issueSequence,
+                remainingAtIssue);
     }
 }

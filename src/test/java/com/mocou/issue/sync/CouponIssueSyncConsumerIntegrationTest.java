@@ -341,15 +341,20 @@ class CouponIssueSyncConsumerIntegrationTest
         return properties;
     }
 
+    // issueSequence/remainingAtIssue 값 자체는 이 클래스의 어떤 테스트도 검증하지 않는다
+    // (배치 버퍼링/flush 트리거만 다룬다) - reservedAtEpochSecond를 그대로 재사용해도
+    // 충분하다. 실제 값 저장 검증은 JdbcCouponIssueSyncRepositoryIntegrationTest가 담당한다.
     private void addEvent(String eventId, long memberId, long reservedAtEpochSecond) {
         redisTemplate.opsForStream().add(
                 issueStreamKey(),
                 Map.of(
                         "eventId", eventId,
                         "eventType", "COUPON_ISSUE_RESERVED",
-                        "schemaVersion", "1",
+                        "schemaVersion", "2",
                         "couponId", Long.toString(COUPON_ID),
                         "memberId", Long.toString(memberId),
+                        "issueSequence", Long.toString(reservedAtEpochSecond),
+                        "remainingAtIssue", Long.toString(reservedAtEpochSecond),
                         "reservedAtEpochSecond", Long.toString(reservedAtEpochSecond)));
     }
 

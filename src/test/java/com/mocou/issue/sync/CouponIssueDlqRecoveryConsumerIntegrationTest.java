@@ -146,15 +146,20 @@ class CouponIssueDlqRecoveryConsumerIntegrationTest
                 gateway, issueGateway, repository, properties, streamGroupRecovery, activeCouponIdHolder);
     }
 
+    // 이 클래스도 issueSequence/remainingAtIssue 값 자체를 검증하지 않는다 - DLQ 복구가
+    // 재처리 여부를 결정하는 데는 couponId/memberId만 쓰인다. reservedAtEpochSecond를
+    // 그대로 재사용해도 충분하다.
     private void addDlqEvent(String eventId, long memberId, long reservedAtEpochSecond) {
         redisTemplate.opsForStream().add(
                 dlqStreamKey(),
                 Map.of(
                         "eventId", eventId,
                         "eventType", "COUPON_ISSUE_RESERVED",
-                        "schemaVersion", "1",
+                        "schemaVersion", "2",
                         "couponId", Long.toString(COUPON_ID),
                         "memberId", Long.toString(memberId),
+                        "issueSequence", Long.toString(reservedAtEpochSecond),
+                        "remainingAtIssue", Long.toString(reservedAtEpochSecond),
                         "reservedAtEpochSecond", Long.toString(reservedAtEpochSecond)));
     }
 
