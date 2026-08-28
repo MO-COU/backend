@@ -25,8 +25,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository {
 
-    // ORDER BY 를 건다. 같은 DB 상태면 같은 쿠폰이 뽑혀야 한다(NFR-3). 기동 시 한 번만
-    // 부를 때는 드러나지 않았으나, 회차 삭제 후에도 다시 부르게 되면서 매번 같은 결과여야 한다.
+    // 호출부가 getFirst()로 첫 행을 집으므로 목록에 순서가 있어야 한다. 정렬 없는 결과에서
+    // 첫 행을 고르면 무엇이 뽑힐지 보장되지 않는다 - 지금은 풀스캔이라 사실상 PK 순이지만
+    // 실행계획이 바뀌면 달라진다.
     private static final String FIND_OPEN_COUPON_IDS = """
             SELECT coupon_id
             FROM coupon
