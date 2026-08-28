@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/admin/load-test")
 @RequiredArgsConstructor
-@Tag(name = "Admin - Load Test", description = "부하 테스트 운영 API")
+@Tag(name = "부하 테스트 API", description = "k6 부하 테스트 실행·조회와 초기화 API")
 public class LoadTestResetController {
 
     private final LoadTestResetService loadTestResetService;

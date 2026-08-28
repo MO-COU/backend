@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/admin/verifications")
-@Tag(name = "Admin - Verification", description = "정합성 검증 API")
+@Tag(name = "정합성 검증 API", description = "쿠폰 발급 이력 정합성 검증 API")
 public class VerificationController {
 
     private final VerificationLauncher launcher;
@@ -75,8 +75,19 @@ public class VerificationController {
     }
 
     @GetMapping("/{runId}")
+    @Operation(
+            summary = "정합성 검증 결과 조회",
+            description =
+                    "검증 실행 번호로 진행 상태, 최종 판정, 검사 건수와 규칙별 결과를 조회합니다. "
+                            + "실행 중인 검증도 조회할 수 있으며, 완료 전에는 최종 판정이 확정되지 않을 수 있습니다.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200", description = "정합성 검증 결과 조회 성공"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404", description = "정합성 검증 실행 기록을 찾을 수 없음 (VERIFICATION_RUN_NOT_FOUND)")
+    })
     public ResponseEntity<ApiResponse<VerificationResultResponse>> getResult(
-            @PathVariable long runId) {
+            @Parameter(description = "정합성 검증 실행 ID", example = "11") @PathVariable long runId) {
         return ResponseEntity.ok(ApiResponse.success(queryService.getResult(runId)));
     }
 }
