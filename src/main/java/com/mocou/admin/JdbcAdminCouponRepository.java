@@ -103,6 +103,20 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
                 offset);
     }
 
+    @Override
+    public List<AdminCouponFailureLogEntry> findDlqFailureLogs(long couponId) {
+        return jdbcTemplate.query(
+                "SELECT member_id, failure_reason, occurred_at FROM issue_failure_log "
+                        + "WHERE coupon_id = ? AND failure_reason = 'INTERNAL_ERROR' "
+                        + "ORDER BY occurred_at DESC",
+                (resultSet, rowNumber) ->
+                        new AdminCouponFailureLogEntry(
+                                resultSet.getLong("member_id"),
+                                resultSet.getString("failure_reason"),
+                                resultSet.getTimestamp("occurred_at").toLocalDateTime()),
+                couponId);
+    }
+
     private static java.time.LocalDateTime toLocalDateTime(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toLocalDateTime();
     }

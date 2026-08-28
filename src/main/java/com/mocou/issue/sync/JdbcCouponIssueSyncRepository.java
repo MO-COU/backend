@@ -119,6 +119,7 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
                 .param("occurredAt", occurredAt)
                 .update();
         notificationSender.notifyMember(NotificationType.ISSUE_FAILED, couponId, memberId);
+        notificationSender.notifyAdmin(NotificationType.ISSUE_SYNC_FAILED, couponId);
     }
 
     // recordFailure와 달리 알림을 보내지 않는다 — 아직 최종 실패가 아니라 DLQ 복구를

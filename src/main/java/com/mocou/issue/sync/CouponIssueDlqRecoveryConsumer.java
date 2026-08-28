@@ -1,11 +1,9 @@
 package com.mocou.issue.sync;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.RedisSystemException;
@@ -16,7 +14,6 @@ import org.springframework.stereotype.Component;
 
 import com.mocou.global.exception.ErrorCode;
 import com.mocou.issue.CouponRedisKey;
-import com.mocou.issue.RedisCouponIssueGateway;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,9 +24,11 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>메인 컨슈머는 빠른 재시도(기본 10초 간격, 최대 3회)만 담당하고, 그래도 안 되면
  * 여기(기본 20초 간격, 최대 5회)로 넘어와 DB가 회복될 때까지 좀 더 여유 있게
- * 재시도한다. 여기서마저 한도를 넘기면 그때 비로소 Redis 재고를 보상하고
- * {@code issue_failure_log}에 최종 실패로 남긴다 — 그 전까지는 회원의 Redis 예약을
- * 그대로 유지해, 복구가 성공하면 애초에 보상이 필요 없게 한다.
+ * 재시도한다. 여기서마저 한도를 넘기면 그때 비로소 최종 실패로 확정한다 — 단,
+ * Redis 재고는 더 이상 자동으로 보상하지 않는다. 회원의 예약은 그대로 남겨두고
+ * 엔트리를 {@code issue-dlq-failed} Stream으로 옮긴 뒤 {@code issue_failure_log}에
+ * 남기고 관리자에게 알림을 보낸다 — 이후 처리(보상 여부 판단 등)는 관리자가
+ * DLQ 실패 목록 조회 API를 보고 직접 결정한다.
  *
  * <p>활성 쿠폰은 메인 컨슈머와 동일하게 {@link ActiveCouponIdHolder} 하나를 공유해서
  * 본다 — "이전 쿠폰은 DLQ까지 전부 끝나야 다음 쿠폰이 시작된다"는 운영 정책상 두
@@ -53,7 +52,6 @@ public class CouponIssueDlqRecoveryConsumer {
     private static final int READ_COUNT = 100;
 
     private final RedisCouponIssueSyncGateway syncGateway;
-    private final RedisCouponIssueGateway issueGateway;
     private final CouponIssueSyncRepository repository;
     private final CouponIssueSyncProperties properties;
     private final RedisStreamGroupRecovery streamGroupRecovery;
@@ -126,7 +124,7 @@ public class CouponIssueDlqRecoveryConsumer {
                     properties.getDlqMaxDeliveryCount());
 
             toRetry.addAll(claim(streamKey, result.retryableIds()));
-            finalizeExhausted(streamKey, claim(streamKey, result.exhaustedIds()));
+            finalizeExhausted(couponId, streamKey, claim(streamKey, result.exhaustedIds()));
         }
 
         retryInsert(couponId, streamKey, toRetry);
@@ -142,7 +140,8 @@ public class CouponIssueDlqRecoveryConsumer {
             return;
         }
 
-        List<CouponIssueSyncEvent> events = records.stream().map(this::parse).toList();
+        List<CouponIssueSyncEvent> events =
+                records.stream().map(CouponIssueSyncEventParser::parse).toList();
         repository.saveBatch(couponId, events);
 
         String[] recordIds = records.stream()
@@ -152,30 +151,45 @@ public class CouponIssueDlqRecoveryConsumer {
     }
 
     /**
-     * DLQ 복구마저 최종 한도(dlqMaxDeliveryCount)를 넘긴 엔트리를 처리한다. 여기서
-     * 비로소 Redis 재고를 보상하고 issue_failure_log에 최종 실패로 남긴다.
-     * compensate는 멱등이라 이 메서드 도중 예외가 나 다음 tick에 재시도돼도 재고를
-     * 이중으로 원복하지 않는다.
+     * DLQ 복구마저 최종 한도(dlqMaxDeliveryCount)를 넘긴 엔트리를 처리한다. Redis
+     * 재고는 더 이상 보상하지 않는다 — 회원의 예약을 그대로 둔 채 엔트리를
+     * {@code issue-dlq-failed} Stream으로 옮겨 관리자가 확인/조회할 수 있게 남긴다.
+     *
+     * <p>이동(XADD+XACK+XDEL을 한 Lua 스크립트로 원자 실행)이 먼저이고 DB 기록은
+     * best-effort로 그 뒤에 온다 — {@link CouponIssueSyncConsumer#moveToDlq}와 같은
+     * 이유다: 재시도가 실패하는 원인이 보통 DB 장애라서, DB 기록을 이동보다 먼저
+     * 하거나 필수로 두면 DB가 죽어있는 동안 최종 실패 확정 자체가 막혀버린다.
+     * issue_failure_log 기록이 실패해도 Redis 쪽 최종 실패 상태(failed 스트림)는
+     * 이미 확정된 뒤라 관리자는 DLQ 실패 목록 조회 API로 여전히 이 엔트리를 볼 수
+     * 있다.
      */
-    private void finalizeExhausted(String streamKey, List<MapRecord<String, String, String>> claimed) {
+    private void finalizeExhausted(
+            long couponId, String streamKey, List<MapRecord<String, String, String>> claimed) {
         if (claimed.isEmpty()) {
             return;
         }
 
-        for (MapRecord<String, String, String> record : claimed) {
-            CouponIssueSyncEvent event = parse(record);
-            issueGateway.compensate(event.couponId(), event.memberId());
-            repository.recordFailure(
-                    event.couponId(),
-                    event.memberId(),
-                    ErrorCode.INTERNAL_ERROR,
-                    LocalDateTime.now(COUPON_TIME_ZONE));
-        }
-
-        String[] recordIds = claimed.stream()
+        String failedStreamKey = CouponRedisKey.issueDlqFailedStream(couponId);
+        List<String> recordIds = claimed.stream()
                 .map(record -> record.getId().getValue())
-                .toArray(String[]::new);
-        streamGroupRecovery.acknowledgeAndDelete(streamKey, GROUP_NAME, recordIds);
+                .toList();
+        streamGroupRecovery.moveEntries(streamKey, failedStreamKey, GROUP_NAME, recordIds);
+
+        for (MapRecord<String, String, String> record : claimed) {
+            CouponIssueSyncEvent event = CouponIssueSyncEventParser.parse(record);
+            try {
+                repository.recordFailure(
+                        event.couponId(),
+                        event.memberId(),
+                        ErrorCode.INTERNAL_ERROR,
+                        LocalDateTime.now(COUPON_TIME_ZONE));
+            } catch (RuntimeException exception) {
+                log.warn(
+                        "최종 실패 기록(issue_failure_log)/관리자 알림에 실패했다 — failed 스트림 이동은 "
+                                + "이미 끝났으므로 재시도하지 않는다. couponId={}, memberId={}",
+                        event.couponId(), event.memberId(), exception);
+            }
+        }
     }
 
     private List<MapRecord<String, String, String>> claim(String streamKey, List<String> ids) {
@@ -183,21 +197,4 @@ public class CouponIssueDlqRecoveryConsumer {
                 streamKey, GROUP_NAME, CONSUMER_NAME, properties.getDlqPendingMinIdleMs(), ids);
     }
 
-    private CouponIssueSyncEvent parse(MapRecord<String, String, String> record) {
-        Map<String, String> fields = record.getValue();
-        return new CouponIssueSyncEvent(
-                record.getId(),
-                Long.parseLong(fields.get("couponId")),
-                Long.parseLong(fields.get("memberId")),
-                fields.get("eventId"),
-                Long.parseLong(fields.get("issueSequence")),
-                Long.parseLong(fields.get("remainingAtIssue")),
-                toIssuedAt(Long.parseLong(fields.get("reservedAtEpochSecond"))));
-    }
-
-    private LocalDateTime toIssuedAt(long reservedAtEpochSecond) {
-        return Instant.ofEpochSecond(reservedAtEpochSecond)
-                .atZone(COUPON_TIME_ZONE)
-                .toLocalDateTime();
-    }
 }

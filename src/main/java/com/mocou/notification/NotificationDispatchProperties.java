@@ -18,7 +18,7 @@ import org.springframework.validation.annotation.Validated;
 public class NotificationDispatchProperties {
 
     @Min(1)
-    private int batchSize = 100;
+    private int batchSize = 500;
 
     // 이 값을 넘겨 재시도해도 계속 실패하면 더 이상 재시도하지 않고
     // notification.status를 FAILED로 확정한다. CouponIssueSyncProperties의 메인

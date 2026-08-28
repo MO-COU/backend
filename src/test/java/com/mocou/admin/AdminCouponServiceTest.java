@@ -6,12 +6,17 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+
 import com.mocou.global.exception.BusinessException;
 import com.mocou.global.exception.ErrorCode;
+import com.mocou.issue.sync.CouponIssueSyncRepository;
 import com.mocou.notification.NotificationRepository;
 import com.mocou.notification.NotificationStatusCounts;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +24,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.connection.stream.MapRecord;
+import org.springframework.data.redis.connection.stream.RecordId;
 
 @ExtendWith(MockitoExtension.class)
 class AdminCouponServiceTest {
@@ -28,6 +35,8 @@ class AdminCouponServiceTest {
     @Mock private AdminCouponRepository repository;
     @Mock private AdminCouponRealtimeStockRepository realtimeStockRepository;
     @Mock private RedisAdminCouponIssueResultRepository issueResultRepository;
+    @Mock private RedisAdminCouponDlqFailureRepository dlqFailureRepository;
+    @Mock private CouponIssueSyncRepository issueSyncRepository;
     @Mock private NotificationRepository notificationRepository;
     @InjectMocks private AdminCouponService service;
 
@@ -263,4 +272,125 @@ class AdminCouponServiceTest {
         assertThat(service.getCoupons()).isEmpty();
     }
 
+    @Test
+    @DisplayName("DLQ 실패 목록을 issue_failure_log 기록으로 보강해 돌려준다")
+    void returnsDlqFailuresEnrichedWithFailureLog() {
+        // given
+        AdminCouponDlqFailure redisOnly =
+                new AdminCouponDlqFailure(
+                        "1735000000000-0", COUPON_ID, 100L, "event-1", 1L, 99L,
+                        LocalDateTime.of(2026, 8, 26, 10, 0), null, null);
+        given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(dlqFailureRepository.findFailures(COUPON_ID)).willReturn(List.of(redisOnly));
+        given(repository.findDlqFailureLogs(COUPON_ID))
+                .willReturn(List.of(new AdminCouponFailureLogEntry(
+                        100L, "INTERNAL_ERROR", LocalDateTime.of(2026, 8, 26, 10, 5))));
+
+        // when
+        List<AdminCouponDlqFailure> result = service.getDlqFailures(COUPON_ID);
+
+        // then
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().failureReason()).isEqualTo("INTERNAL_ERROR");
+        assertThat(result.getFirst().occurredAt()).isEqualTo(LocalDateTime.of(2026, 8, 26, 10, 5));
+    }
+
+    @Test
+    @DisplayName("issue_failure_log 기록이 없어도 Redis 실패 목록은 그대로 보여준다")
+    void returnsDlqFailuresWithoutFailureLogWhenDbWriteMissed() {
+        // given - DLQ 재시도가 소진된 원인이 DB 장애라면 fail log 자체가 없을 수 있다
+        AdminCouponDlqFailure redisOnly =
+                new AdminCouponDlqFailure(
+                        "1735000000000-0", COUPON_ID, 100L, "event-1", 1L, 99L,
+                        LocalDateTime.of(2026, 8, 26, 10, 0), null, null);
+        given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(dlqFailureRepository.findFailures(COUPON_ID)).willReturn(List.of(redisOnly));
+        given(repository.findDlqFailureLogs(COUPON_ID)).willReturn(List.of());
+
+        // when
+        List<AdminCouponDlqFailure> result = service.getDlqFailures(COUPON_ID);
+
+        // then
+        assertThat(result).containsExactly(redisOnly);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 쿠폰의 DLQ 실패 목록 조회를 거부한다")
+    void rejectsDlqFailuresForMissingCoupon() {
+        given(repository.existsCoupon(COUPON_ID)).willReturn(false);
+
+        assertThatThrownBy(() -> service.getDlqFailures(COUPON_ID))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.COUPON_NOT_FOUND));
+        verify(dlqFailureRepository, never()).findFailures(COUPON_ID);
+    }
+
+    @Test
+    @DisplayName("DLQ 실패 항목을 재시도해 저장에 성공하면 failed 스트림에서 제거한다")
+    void retriesDlqFailureAndRemovesFromFailedStream() {
+        // given
+        String recordId = "1735000000000-0";
+        MapRecord<String, String, String> record = dlqRecord(recordId, 100L);
+        given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(dlqFailureRepository.findOne(COUPON_ID, recordId)).willReturn(Optional.of(record));
+        given(issueSyncRepository.saveBatch(eq(COUPON_ID), any()))
+                .willAnswer(invocation -> invocation.getArgument(1));
+
+        // when
+        AdminCouponDlqRetryResult result = service.retryDlqFailure(COUPON_ID, recordId);
+
+        // then
+        assertThat(result).isEqualTo(new AdminCouponDlqRetryResult(COUPON_ID, 100L, true));
+        verify(dlqFailureRepository).delete(COUPON_ID, recordId);
+    }
+
+    @Test
+    @DisplayName("이미 DB에 저장돼 있던 항목을 재시도하면 saved=false로 알리되 failed 스트림에서는 제거한다")
+    void retriesAlreadySavedDlqFailureAndStillRemovesIt() {
+        // given - saveBatch가 중복 skip으로 빈 목록을 돌려주는 경우
+        String recordId = "1735000000000-0";
+        MapRecord<String, String, String> record = dlqRecord(recordId, 100L);
+        given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(dlqFailureRepository.findOne(COUPON_ID, recordId)).willReturn(Optional.of(record));
+        given(issueSyncRepository.saveBatch(eq(COUPON_ID), any())).willReturn(List.of());
+
+        // when
+        AdminCouponDlqRetryResult result = service.retryDlqFailure(COUPON_ID, recordId);
+
+        // then
+        assertThat(result).isEqualTo(new AdminCouponDlqRetryResult(COUPON_ID, 100L, false));
+        verify(dlqFailureRepository).delete(COUPON_ID, recordId);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 recordId를 재시도하면 거부하고 saveBatch를 호출하지 않는다")
+    void rejectsRetryForMissingRecordId() {
+        given(repository.existsCoupon(COUPON_ID)).willReturn(true);
+        given(dlqFailureRepository.findOne(COUPON_ID, "missing")).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.retryDlqFailure(COUPON_ID, "missing"))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.ISSUE_DLQ_FAILURE_NOT_FOUND));
+        verify(issueSyncRepository, never()).saveBatch(eq(COUPON_ID), any());
+        verify(dlqFailureRepository, never()).delete(eq(COUPON_ID), any());
+    }
+
+    private MapRecord<String, String, String> dlqRecord(String recordId, long memberId) {
+        return MapRecord.create(
+                        "test-stream",
+                        Map.of(
+                                "eventId", "event-1",
+                                "couponId", Long.toString(COUPON_ID),
+                                "memberId", Long.toString(memberId),
+                                "issueSequence", "1",
+                                "remainingAtIssue", "99",
+                                "reservedAtEpochSecond", "1"))
+                .withId(RecordId.of(recordId));
+    }
 }
