@@ -31,9 +31,11 @@ public class NotificationDispatchProperties {
     // 커밋 직후 같은 row를 처리 중일 수 있는 시간대라, 폴링이 여기 끼어들면 같은 알림이
     // 두 번 발송될 수 있다. 즉시 경로는 findPending을 거치지 않으므로 이 값에 영향받지
     // 않는다 - 지금(로그만 남기는 모킹)은 배치 처리가 사실상 순간이라 여유값이지만, 실제
-    // 발송 연동으로 배치 처리 시간이 늘면 그보다 크게 잡아야 한다.
+    // 발송 연동으로 배치 처리 시간이 늘면 그보다 크게 잡아야 한다. CouponIssueSyncProperties의
+    // batchWindowMs(3초)와 값을 맞췄다 - 개념은 다르지만(여긴 flush 대기가 아니라 안전망과의
+    // 중복 방지 여유값) 설정값 하나로 통일해 관리 부담을 줄인다.
     @Min(0)
-    private int minDispatchAgeSeconds = 5;
+    private int minDispatchAgeSeconds = 3;
 
     public int getBatchSize() {
         return batchSize;
