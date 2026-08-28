@@ -5,6 +5,7 @@ import com.mocou.global.exception.ErrorCode;
 import com.mocou.issue.CouponRedisKey;
 import com.mocou.issue.initialization.CouponRedisInitializationResult;
 import com.mocou.issue.initialization.CouponRedisInitializationService;
+import com.mocou.issue.sync.CouponRoundDeletedEvent;
 import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
 import com.mocou.loadtest.LoadTestRunRepository;
 import java.time.LocalDateTime;
@@ -75,12 +76,24 @@ public class CouponRoundService {
     /**
      * 회차와 거기 딸린 모든 기록을 지운다. 되돌릴 수 없다.
      *
-     * <p>순서가 정해져 있다. <b>Redis를 먼저 닫고 DB를 지운다.</b> DB를 먼저 지우면 그 사이에도 Redis는
-     * 발급을 받고, 그렇게 예약된 건이 없어진 쿠폰을 참조해 <b>컨슈머가 FK 위반으로 죽는다.</b> 리셋에서는
-     * "지운 발급이 되살아난다"에 그쳤지만 여기서는 동기화 파이프라인이 멈춘다.
+     * <p><b>Redis 키를 맨 마지막에 지운다.</b> 동기화 컨슈머는 운영에서 항상 켜진 채 10ms마다 활성
+     * 쿠폰의 스트림을 읽는다. 그 스트림 키를 먼저 지우면 컨슈머가 {@code NOGROUP}을 만나 "Redis가
+     * 초기화됐구나" 하고 그룹을 다시 만드는데, {@code XGROUP CREATE}가 {@code MKSTREAM}으로
+     * <b>스트림 키까지 되살린다.</b> 발급 1만 건을 지우는 트랜잭션이 수백 ms라 그 사이에 반드시 일어난다.
+     * 컨슈머는 우리가 일부러 지운 것인지 사고로 사라진 것인지 구분하지 못한다.
+     *
+     * <p>그래서 <b>컨슈머가 이 쿠폰에서 손을 뗀 뒤에</b> 키를 지운다. DB에서 쿠폰이 사라지면 재도출에서
+     * 빠지므로, 삭제 이벤트를 먼저 보내고 그다음에 키를 지운다.
+     *
+     * <p>반대 순서(Redis 먼저)를 택하면 "DB만 지운 사이 Redis가 예약을 받는" 창을 막을 수 있다. 그러나
+     * 그 창은 관리자가 다 끝난 회차를 정리하는 수백 ms이고 앞의 가드 둘이 이미 부하 테스트와 미처리 발급이
+     * 없음을 확인한 뒤다. <b>확률이 낮은 쪽 대신 반드시 재현되는 쪽을 막는다.</b>
      *
      * <p>{@code create}와 달리 Redis를 다시 세우지 않는다. DB에 쿠폰이 없는데 재고 키를 만들면 아무도
      * 참조하지 않는 유령 키가 남는다.
+     *
+     * <p>키 삭제가 실패하면 DB에서는 사라진 회차의 키가 Redis에 남는다. 다음 회차는 새 번호를 받으므로
+     * 충돌하지 않고, 같은 {@code couponId}로 삭제를 다시 부르면 정리된다.
      *
      * @throws BusinessException 없는 쿠폰이거나, 종료된 회차이거나, 부하 테스트·동기화가 진행 중이면
      */
@@ -89,15 +102,16 @@ public class CouponRoundService {
         rejectIfLoadTestRunning();
         rejectIfSyncInProgress(couponId);
 
-        redisTemplate.delete(CouponRedisKey.allIssueKeys(couponId));
-
         CouponRoundDeleteResult result =
                 Objects.requireNonNull(
                         transactionTemplate.execute(status -> repository.deleteRound(couponId)),
                         "트랜잭션 콜백이 결과를 돌려주지 않았다");
 
         // 커밋된 뒤에 알린다. 트랜잭션 안에서 알리면 롤백됐을 때 동기화 대상만 바뀐 상태가 남는다.
+        // 리스너가 같은 스레드에서 동기로 돌아, 이 줄이 끝나면 컨슈머는 더 이상 이 쿠폰을 보지 않는다.
         eventPublisher.publishEvent(new CouponRoundDeletedEvent(couponId));
+
+        redisTemplate.delete(CouponRedisKey.allIssueKeys(couponId));
 
         log.info(
                 "회차 삭제 (쿠폰 {}, 발급 {}건, 이력 {}건, 검증 {}건)",

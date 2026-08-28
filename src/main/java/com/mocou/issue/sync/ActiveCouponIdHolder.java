@@ -2,8 +2,6 @@ package com.mocou.issue.sync;
 
 import java.util.List;
 
-import com.mocou.coupon.CouponRoundDeletedEvent;
-
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
