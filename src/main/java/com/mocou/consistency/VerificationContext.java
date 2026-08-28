@@ -10,9 +10,15 @@ import java.time.LocalDateTime;
  * @param snapshotAt 판정 기준 시각. 읽기 트랜잭션의 스냅샷 시점과 같아야 한다
  * @param graceSeconds 만료 지연 유예. 만료 배치 주기에서 파생되는 값이라 상수가 아니다
  * @param violationLimit 규칙당 저장할 위반 상세의 최대 건수
+ * @param countCache 실행 1회 동안 테이블 건수 조회를 재사용하는 캐시. 컨텍스트와 수명을 같이한다
  */
 public record VerificationContext(
-        LocalDateTime snapshotAt, long graceSeconds, int violationLimit) {
+        LocalDateTime snapshotAt, long graceSeconds, int violationLimit, CountCache countCache) {
+
+    /** 실행마다 새 캐시를 함께 만든다. 기존 호출부는 이 생성자를 그대로 쓴다. */
+    public VerificationContext(LocalDateTime snapshotAt, long graceSeconds, int violationLimit) {
+        this(snapshotAt, graceSeconds, violationLimit, new CountCache());
+    }
 
     public VerificationContext {
         if (snapshotAt == null) {
@@ -25,6 +31,9 @@ public record VerificationContext(
             throw new IllegalArgumentException(
                     "위반 상세 상한(%d)은 1 이상이어야 한다. 0이면 불일치 항목을 하나도 남기지 못한다"
                             .formatted(violationLimit));
+        }
+        if (countCache == null) {
+            throw new IllegalArgumentException("건수 캐시는 필수다");
         }
     }
 }

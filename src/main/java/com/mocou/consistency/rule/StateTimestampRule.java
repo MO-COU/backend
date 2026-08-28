@@ -99,7 +99,7 @@ class StateTimestampRule implements ConsistencyRule {
     @Override
     public RuleOutcome check(
             NamedParameterJdbcTemplate jdbcTemplate, VerificationContext context) {
-        long checkedCount = RuleQueries.count(jdbcTemplate, CHECKED_SQL);
+        long checkedCount = RuleQueries.countOnce(jdbcTemplate, context, CHECKED_SQL);
         Map<String, Object> params = params(context);
 
         long violationCount = RuleQueries.count(jdbcTemplate, VIOLATION_COUNT_SQL, params);

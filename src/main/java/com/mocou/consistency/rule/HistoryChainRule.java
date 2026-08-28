@@ -235,7 +235,7 @@ class HistoryChainRule implements ConsistencyRule {
         List<Violation> violations = new ArrayList<>();
 
         for (ChainCheck check : CHECKS) {
-            checkedCount += RuleQueries.count(jdbcTemplate, check.checkedSql());
+            checkedCount += RuleQueries.countOnce(jdbcTemplate, context, check.checkedSql());
             long found = RuleQueries.count(jdbcTemplate, check.violationCountSql());
             violationCount += found;
 
