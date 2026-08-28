@@ -39,28 +39,37 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
-    @DisplayName("MySQL에 적재된 쿠폰 발급 이력을 최신순으로 조회한다")
+    @DisplayName("발급 이력을 선착순으로 조회하고 순번이 없는 이력은 마지막에 표시한다")
     void readsCouponIssuesFromMySql() {
         // given
         insertCouponAndMembers();
-        insertIssue(3001L, 1001L, "2026-08-19 10:00:00");
-        insertIssue(3002L, 1002L, "2026-08-19 10:01:00");
+        insertIssue(3001L, 1001L, "2026-08-19 10:00:00", 2L, 9_998L);
+        insertIssue(3002L, 1002L, "2026-08-19 10:01:00", 1L, 9_999L);
+        insertIssue(3003L, 1003L, "2026-08-19 10:02:00");
 
         // when
-        AdminCouponIssuePage result = service.getIssues(COUPON_ID, 0, 1);
+        AdminCouponIssuePage firstPage = service.getIssues(COUPON_ID, 0, 2);
+        AdminCouponIssuePage secondPage = service.getIssues(COUPON_ID, 1, 2);
 
         // then
-        assertThat(result.totalElements()).isEqualTo(2);
-        assertThat(result.totalPages()).isEqualTo(2);
-        assertThat(result.hasNext()).isTrue();
-        assertThat(result.content()).extracting(AdminCouponIssue::issueId).containsExactly(3002L);
-        assertThat(result.content().getFirst().memberName()).isEqualTo("회*2");
-        assertThat(result.content().getFirst().memberEmail())
+        assertThat(firstPage.totalElements()).isEqualTo(3);
+        assertThat(firstPage.totalPages()).isEqualTo(2);
+        assertThat(firstPage.hasNext()).isTrue();
+        assertThat(firstPage.content())
+                .extracting(AdminCouponIssue::issueId)
+                .containsExactly(3002L, 3001L);
+        assertThat(firstPage.content())
+                .extracting(AdminCouponIssue::issueSequence)
+                .containsExactly(1L, 2L);
+        assertThat(firstPage.content().getFirst().memberName()).isEqualTo("회*2");
+        assertThat(firstPage.content().getFirst().memberEmail())
                 .isEqualTo("me*****@example.com");
-        assertThat(result.content().getFirst().memberPhone()).isEqualTo("010-****-0002");
-        // Redis를 거치지 않고 직접 적재된 행이라 순번/잔여재고가 NULL로 남아야 한다(V11).
-        assertThat(result.content().getFirst().issueSequence()).isNull();
-        assertThat(result.content().getFirst().remainingAtIssue()).isNull();
+        assertThat(firstPage.content().getFirst().memberPhone()).isEqualTo("010-****-0002");
+
+        assertThat(secondPage.hasNext()).isFalse();
+        assertThat(secondPage.content()).extracting(AdminCouponIssue::issueId).containsExactly(3003L);
+        assertThat(secondPage.content().getFirst().issueSequence()).isNull();
+        assertThat(secondPage.content().getFirst().remainingAtIssue()).isNull();
     }
 
     @Test
@@ -91,7 +100,8 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
         jdbcTemplate.update(
                 "INSERT INTO member (member_id, email, name, phone) VALUES "
                         + "(1001, 'member1@example.com', '회원1', '01000000001'), "
-                        + "(1002, 'member2@example.com', '회원2', '01000000002')");
+                        + "(1002, 'member2@example.com', '회원2', '01000000002'), "
+                        + "(1003, 'member3@example.com', '회원3', '01000000003')");
         jdbcTemplate.update(
                 "INSERT INTO coupon (coupon_id, name, open_at, close_at, status) "
                         + "VALUES (?, '관리자 조회 테스트 쿠폰', "
@@ -101,14 +111,26 @@ class AdminCouponIssueIntegrationTest extends MySqlContainerTest {
     }
 
     private void insertIssue(long issueId, long memberId, String issuedAt) {
+        insertIssue(issueId, memberId, issuedAt, null, null);
+    }
+
+    private void insertIssue(
+            long issueId,
+            long memberId,
+            String issuedAt,
+            Long issueSequence,
+            Long remainingAtIssue) {
         LocalDateTime issuedDateTime = LocalDateTime.parse(issuedAt.replace(' ', 'T'));
         jdbcTemplate.update(
                 "INSERT INTO coupon_issue "
-                        + "(coupon_issue_id, coupon_id, member_id, status, issued_at, expires_at) "
-                        + "VALUES (?, ?, ?, 'ISSUED', ?, ?)",
+                        + "(coupon_issue_id, coupon_id, member_id, issue_sequence, remaining_at_issue, "
+                        + "status, issued_at, expires_at) "
+                        + "VALUES (?, ?, ?, ?, ?, 'ISSUED', ?, ?)",
                 issueId,
                 COUPON_ID,
                 memberId,
+                issueSequence,
+                remainingAtIssue,
                 issuedDateTime,
                 issuedDateTime.plusDays(7));
     }

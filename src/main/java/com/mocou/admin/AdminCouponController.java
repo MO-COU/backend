@@ -65,7 +65,7 @@ public class AdminCouponController {
     @Tag(name = "Admin Coupon", description = "관리자 쿠폰(회차) 조회 API")
     @Operation(
             summary = "쿠폰 발급 이력 조회",
-            description = "회차별 DB 발급 이력을 페이지로 조회합니다.")
+            description = "회차별 DB 발급 이력을 선착순 발급 순번으로 조회합니다. 순번이 없는 기존 이력은 마지막에 표시합니다.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "200", description = "쿠폰 발급 이력 조회 성공"),
