@@ -1,5 +1,7 @@
 package com.mocou.issue;
 
+import java.util.Set;
+
 public final class CouponRedisKey {
     private CouponRedisKey() {
     }
@@ -61,6 +63,26 @@ public final class CouponRedisKey {
     public static String issueDlqFailedStream(long couponId) {
         validateCouponId(couponId);
         return "coupon:{%d}:issue-dlq-failed".formatted(couponId);
+    }
+
+    /**
+     * 한 회차가 쓰는 Redis Key 전부. 회차를 지울 때 남는 것이 없어야 한다.
+     *
+     * <p>키를 추가하면 여기에도 넣는다. 목록을 지우는 쪽에 두면 키를 늘린 사람이 그 목록을 보지 못해
+     * 하나가 남는다 - 실제로 {@link #issueDlqFailedStream}이 그렇게 빠져, 리셋을 해도 이전 회차의
+     * 최종 실패 목록이 관리자 화면에 그대로 남았다. 키를 정의한 이 클래스가 목록도 함께 책임진다.
+     */
+    public static Set<String> allIssueKeys(long couponId) {
+        validateCouponId(couponId);
+        return Set.of(
+                stock(couponId),
+                issuedMembers(couponId),
+                metadata(couponId),
+                issueStream(couponId),
+                issueResultCounts(couponId),
+                issueSequence(couponId),
+                issueDlqStream(couponId),
+                issueDlqFailedStream(couponId));
     }
 
     private static void validateCouponId(long couponId) {

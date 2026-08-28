@@ -2,7 +2,7 @@ package com.mocou.coupon;
 
 import java.time.LocalDateTime;
 
-/** 회차를 만든다. */
+/** 회차를 만들고 지운다. */
 public interface CouponRoundRepository {
 
     /**
@@ -25,4 +25,17 @@ public interface CouponRoundRepository {
             LocalDateTime openAt,
             LocalDateTime closeAt,
             int totalQuantity);
+
+    /** 쿠폰의 상태. 없으면 {@code null}. */
+    String findStatus(long couponId);
+
+    /**
+     * 회차 하나와 거기 딸린 모든 기록을 지운다.
+     *
+     * <p>순서를 메서드 하나로 감싸는 이유는 <b>지우는 차례를 FK가 정하기</b> 때문이다. 열 단계를 호출부에
+     * 늘어놓으면 순서를 바꿔도 컴파일이 통과하고, 어긋난 순간 {@code ERROR 1451}로만 드러난다.
+     *
+     * <p>호출부가 트랜잭션을 열어야 한다. 중간에 끊기면 절반만 지워진 회차가 남는다.
+     */
+    CouponRoundDeleteResult deleteRound(long couponId);
 }
