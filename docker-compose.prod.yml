@@ -25,6 +25,7 @@ services:
     image: redis:8.8-alpine
     container_name: mocou-redis
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     volumes:
       - redis-data:/data
     healthcheck:

@@ -1,10 +1,15 @@
 package com.mocou.issue.sync;
 
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -25,10 +30,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository {
 
+    // 호출부가 getFirst()로 첫 행을 집으므로 목록에 순서가 있어야 한다. 정렬 없는 결과에서
+    // 첫 행을 고르면 무엇이 뽑힐지 보장되지 않는다 - 지금은 풀스캔이라 사실상 PK 순이지만
+    // 실행계획이 바뀌면 달라진다.
     private static final String FIND_OPEN_COUPON_IDS = """
             SELECT coupon_id
             FROM coupon
             WHERE status = 'OPEN'
+            ORDER BY coupon_id
             """;
 
     private static final String INSERT_COUPON_ISSUE = """
@@ -37,9 +46,26 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
             VALUES (:couponId, :memberId, :issueSequence, :remainingAtIssue, 'ISSUED', :issuedAt, :expiresAt)
             """;
 
+    // JdbcTemplate.batchUpdate는 이름 있는 파라미터를 지원하지 않아 위치 파라미터로 따로 둔다.
+    private static final String INSERT_COUPON_ISSUE_BATCH = """
+            INSERT INTO coupon_issue (
+                coupon_id, member_id, issue_sequence, remaining_at_issue, status, issued_at, expires_at)
+            VALUES (?, ?, ?, ?, 'ISSUED', ?, ?)
+            """;
+
     private static final String INSERT_COUPON_ISSUE_HISTORY = """
             INSERT INTO coupon_issue_history (coupon_issue_id, from_status, to_status, changed_at, idempotency_key)
             VALUES (:couponIssueId, 'UNISSUED', 'ISSUED', :changedAt, :idempotencyKey)
+            """;
+
+    private static final String INSERT_COUPON_ISSUE_HISTORY_BATCH = """
+            INSERT INTO coupon_issue_history (coupon_issue_id, from_status, to_status, changed_at, idempotency_key)
+            VALUES (?, 'UNISSUED', 'ISSUED', ?, ?)
+            """;
+
+    private static final String FIND_COUPON_ISSUE_IDS_BY_MEMBER = """
+            SELECT coupon_issue_id, member_id FROM coupon_issue
+            WHERE coupon_id = :couponId AND member_id IN (:memberIds)
             """;
 
     private static final String DECREASE_COUPON_STOCK = """
@@ -59,6 +85,8 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
     private static final String IDEMPOTENCY_KEY_PREFIX = "ISSUE:";
 
     private final JdbcClient jdbcClient;
+    // 배치 INSERT(addBatch/executeBatch)는 JdbcClient에 없어 JdbcTemplate을 별도로 쓴다.
+    private final JdbcTemplate jdbcTemplate;
     // outbox: 저장/실패 기록과 같은 트랜잭션 안에서 알림을 PENDING으로 큐잉하기 위해 주입.
     private final NotificationSender notificationSender;
 
@@ -70,18 +98,22 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
     }
 
     /*
-     * UNIQUE(coupon_id, member_id) 위반만 DuplicateKeyException으로 잡아 skip —
-     * 이 catch가 @Transactional 경계를 안 넘으므로 트랜잭션은 rollback-only가
-     * 안 되고, 배치의 나머지 이벤트도 같은 트랜잭션에서 계속 처리된다.
+     * addBatch/executeBatch로 한 번에 시도하고, 실패하면(주로 재전달 중복) 이전과
+     * 동일한 건별 처리로 폴백한다 - 자세한 이유는 trySaveBatch 주석 참조.
      */
     @Override
     @Transactional
     public List<CouponIssueSyncEvent> saveBatch(long couponId, List<CouponIssueSyncEvent> events) {
-        List<CouponIssueSyncEvent> savedEvents = new ArrayList<>();
-        for (CouponIssueSyncEvent event : events) {
-            if (saveOne(event)) {
-                savedEvents.add(event);
-            }
+        if (events.isEmpty()) {
+            return List.of();
+        }
+
+        // 1건이면 배치 경로가 오히려 손해다 - 배치는 generated key를 못 받아와 id
+        // 재조회 SELECT가 하나 더 필요한데, saveOne은 KeyHolder로 그 왕복 없이 바로
+        // 얻는다. 그래서 1건일 땐 애초에 배치를 시도하지 않는다.
+        List<CouponIssueSyncEvent> savedEvents = events.size() > 1 ? trySaveBatch(couponId, events) : null;
+        if (savedEvents == null) {
+            savedEvents = saveOneByOne(events);
         }
 
         // skip된 건 예전 saveBatch에서 이미 재고를 차감했으므로 카운트에서 제외 —
@@ -94,9 +126,8 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
         }
 
         // outbox: 이 트랜잭션 안에서 큐잉해야 "커밋은 됐는데 알림 큐잉이 안 된" 크래시 갭이 없다.
-        // 한 번에 여러 건이 자연스럽게 발생하는 곳이라 벌크 메서드를 쓴다 — 큐잉 자체는
-        // 건별 insert지만(유니크 제약 skip이 건별로 걸림), 발송 성공 후 SENT 갱신은
-        // 이 배치 전체가 한 번에 묶여 나간다.
+        // 한 번에 여러 건이 자연스럽게 발생하는 곳이라 벌크 메서드를 쓴다 — notifyMembers도
+        // 배치 우선 시도 + 건별 폴백 구조라 여기와 동일한 원리로 왕복을 줄인다.
         if (!savedEvents.isEmpty()) {
             notificationSender.notifyMembers(
                     NotificationType.ISSUE_SUCCESS,
@@ -104,6 +135,89 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
                     savedEvents.stream().map(CouponIssueSyncEvent::memberId).toList());
         }
 
+        return savedEvents;
+    }
+
+    /**
+     * coupon_issue를 addBatch/executeBatch로 한 번에 넣어보고, 성공하면 방금 넣은 행의
+     * coupon_issue_id를 다시 조회해 coupon_issue_history도 배치로 채운다.
+     *
+     * <p>{@code rewriteBatchedStatements=true}(local/prod 데이터소스 URL에 설정됨)에서
+     * MySQL 드라이버가 이 addBatch 호출들을 진짜 하나의 multi-row INSERT 문으로
+     * 재작성해 보낸다 — 그래서 한 행이라도 UNIQUE(coupon_id, member_id) 위반이면 그
+     * 문장 전체가 원자적으로 실패하고 아무 행도 반영되지 않는다. 이 전제 덕분에 실패
+     * 시 "일부만 반영된" 상태 걱정 없이 통째로 건별 폴백으로 넘어갈 수 있다. 이 설정이
+     * 빠지면 이 가정이 깨지니 반드시 유지해야 한다.
+     *
+     * <p>coupon_issue 배치가 이미 성공한 뒤(즉 이 메서드가 null을 반환하지 않기로 확정된
+     * 뒤)에 일어나는 실패(id 재조회, history 배치)는 여기서 잡지 않고 그대로 던진다 —
+     * 그 시점에 폴백하면 방금 넣은 coupon_issue 행을 saveOne이 "이미 처리된 재전달
+     * 중복"으로 오인해 건너뛰어 버려서 coupon_issue_history를 영영 못 채우게 된다.
+     *
+     * @return 배치가 전부 성공하면 저장된 이벤트 목록, 실패(주로 재전달 중복)하면 null
+     */
+    private List<CouponIssueSyncEvent> trySaveBatch(long couponId, List<CouponIssueSyncEvent> events) {
+        if (!tryBatchInsertCouponIssue(events)) {
+            return null;
+        }
+
+        Map<Long, Long> couponIssueIdByMemberId = findCouponIssueIds(couponId, events);
+        batchInsertCouponIssueHistory(events, couponIssueIdByMemberId);
+        return new ArrayList<>(events);
+    }
+
+    private boolean tryBatchInsertCouponIssue(List<CouponIssueSyncEvent> events) {
+        try {
+            List<Object[]> batchArgs = events.stream()
+                    .map(event -> new Object[] {
+                            event.couponId(),
+                            event.memberId(),
+                            event.issueSequence(),
+                            event.remainingAtIssue(),
+                            Timestamp.valueOf(event.issuedAt()),
+                            Timestamp.valueOf(event.issuedAt().plusDays(EXPIRATION_DAYS))
+                    })
+                    .toList();
+            jdbcTemplate.batchUpdate(INSERT_COUPON_ISSUE_BATCH, batchArgs);
+            return true;
+        } catch (DataAccessException exception) {
+            return false;
+        }
+    }
+
+    private Map<Long, Long> findCouponIssueIds(long couponId, List<CouponIssueSyncEvent> events) {
+        List<Long> memberIds = events.stream().map(CouponIssueSyncEvent::memberId).toList();
+        return jdbcClient.sql(FIND_COUPON_ISSUE_IDS_BY_MEMBER)
+                .param("couponId", couponId)
+                .param("memberIds", memberIds)
+                .query((rs, rowNum) -> Map.entry(rs.getLong("member_id"), rs.getLong("coupon_issue_id")))
+                .list()
+                .stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    private void batchInsertCouponIssueHistory(
+            List<CouponIssueSyncEvent> events, Map<Long, Long> couponIssueIdByMemberId) {
+        List<Object[]> batchArgs = events.stream()
+                .map(event -> {
+                    long couponIssueId = couponIssueIdByMemberId.get(event.memberId());
+                    return new Object[] {
+                            couponIssueId,
+                            Timestamp.valueOf(event.issuedAt()),
+                            IDEMPOTENCY_KEY_PREFIX + couponIssueId
+                    };
+                })
+                .toList();
+        jdbcTemplate.batchUpdate(INSERT_COUPON_ISSUE_HISTORY_BATCH, batchArgs);
+    }
+
+    private List<CouponIssueSyncEvent> saveOneByOne(List<CouponIssueSyncEvent> events) {
+        List<CouponIssueSyncEvent> savedEvents = new ArrayList<>();
+        for (CouponIssueSyncEvent event : events) {
+            if (saveOne(event)) {
+                savedEvents.add(event);
+            }
+        }
         return savedEvents;
     }
 

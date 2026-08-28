@@ -50,6 +50,11 @@ public enum ErrorCode {
     LOAD_TEST_COUPON_NOT_READY(HttpStatus.CONFLICT, "부하 테스트를 실행할 수 없는 쿠폰 상태입니다"),
     LOAD_TEST_RUN_NOT_FOUND(HttpStatus.NOT_FOUND, "부하 테스트 실행 결과를 찾을 수 없습니다"),
 
+    // 회차 삭제
+    // 종료된 회차(더미데이터)·진행 중인 부하 테스트·미반영 발급을 모두 이 코드로 거부한다.
+    // 사유가 셋이라 메시지는 예외를 만들 때 붙인다.
+    COUPON_ROUND_NOT_DELETABLE(HttpStatus.CONFLICT, "삭제할 수 없는 회차입니다"),
+
     // 알림 (outbox)
     // notification insert(큐잉) 자체가 실패한 경우 - uk_notification_target 중복은
     // 정상 스킵이라 여기 안 해당하고, 그 외 DB 오류(커넥션 끊김 등)만 해당한다.

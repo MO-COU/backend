@@ -168,6 +168,27 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
                 type);
     }
 
+    // 1건짜리 saveBatch는 배치 경로를 타지 않고 saveOne으로 바로 처리된다(관리자 재시도
+    // API, 트래픽이 적을 때의 flush 등) - 여기서도 결과가 동일한지 확인한다.
+    @Test
+    @DisplayName("이벤트 1건짜리 saveBatch도 정상 저장된다")
+    void savesSingleEventWithoutBatchPath() {
+        // given
+        insertCoupon(COUPON_ID, "OPEN");
+        insertCouponStock(COUPON_ID, 100);
+        insertMember(MEMBER_ID_1);
+
+        // when
+        List<CouponIssueSyncEvent> savedEvents =
+                repository.saveBatch(COUPON_ID, List.of(syncEvent(MEMBER_ID_1, "event-1", 1L, 99L)));
+
+        // then
+        assertThat(savedEvents).extracting(CouponIssueSyncEvent::memberId).containsExactly(MEMBER_ID_1);
+        assertThat(issueCount(COUPON_ID)).isEqualTo(1);
+        assertThat(issuedHistoryCount(COUPON_ID, MEMBER_ID_1)).isEqualTo(1);
+        assertThat(remainingStockOf(COUPON_ID)).isEqualTo(99);
+    }
+
     @Test
     @DisplayName("이미 처리된(coupon_id, member_id) 이벤트는 건너뛰고 나머지만 저장한다")
     void skipsAlreadyProcessedEventOnRedelivery() {
