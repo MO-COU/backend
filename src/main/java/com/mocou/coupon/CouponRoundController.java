@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/admin/coupons")
 @RequiredArgsConstructor
-@Tag(name = "Admin - Coupon", description = "부하 테스트용 회차 관리 API")
+@Tag(name = "관리자 쿠폰·대시보드 API", description = "관리자 쿠폰 회차와 대시보드 조회 API")
 public class CouponRoundController {
 
     private final CouponRoundService couponRoundService;

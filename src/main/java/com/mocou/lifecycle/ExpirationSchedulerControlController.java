@@ -14,8 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 서버 재시작 없이 만료 스케줄러의 자동 실행 상태를 제어한다. */
 @RestController
-@RequestMapping("/internal/lifecycle/expiration-scheduler")
-@Tag(name = "Lifecycle", description = "쿠폰 생명주기 제어 API")
+@RequestMapping("/api/internal/lifecycle/expiration-scheduler")
+@Tag(name = "내부 운영 API", description = "서버 내부 운영 제어 API")
 public class ExpirationSchedulerControlController {
 
     private final ExpirationSchedulerState schedulerState;

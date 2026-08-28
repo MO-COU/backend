@@ -20,7 +20,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/coupons")
 @RequiredArgsConstructor
-@Tag(name = "Coupon Issue", description = "회원 쿠폰 발급 예약 API")
+@Tag(name = "사용자·쿠폰 API", description = "사용자 쿠폰 발급과 사용 API")
 public class CouponIssueReservationController {
 
     private final CouponIssueReservationService service;

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/admin/coupons")
+@Tag(name = "관리자 쿠폰·대시보드 API", description = "관리자 쿠폰 회차와 대시보드 조회 API")
 public class AdminCouponController {
 
     private final AdminCouponService service;
@@ -24,7 +25,6 @@ public class AdminCouponController {
     }
 
     @GetMapping
-    @Tag(name = "Admin Coupon", description = "관리자 쿠폰(회차) 조회 API")
     @Operation(
             summary = "회차 목록 조회",
             description =
@@ -39,7 +39,6 @@ public class AdminCouponController {
 
     /** Redis 재고와 DB 적재 현황을 조회한다. */
     @GetMapping("/{couponId}/stock")
-    @Tag(name = "Admin Coupon", description = "관리자 쿠폰(회차) 조회 API")
     @Operation(
             summary = "쿠폰 재고 조회",
             description = "Redis 재고와 DB 발급 건수, 동기화 차이를 조회합니다.")
@@ -62,7 +61,6 @@ public class AdminCouponController {
 
     /** DB 발급 이력을 페이지로 조회한다. */
     @GetMapping("/{couponId}/issues")
-    @Tag(name = "Admin Coupon", description = "관리자 쿠폰(회차) 조회 API")
     @Operation(
             summary = "쿠폰 발급 이력 조회",
             description = "회차별 DB 발급 이력을 페이지로 조회합니다.")
@@ -88,7 +86,6 @@ public class AdminCouponController {
     }
 
     @GetMapping("/{couponId}/issue-result-counts")
-    @Tag(name = "Issue Results", description = "Redis 발급 결과와 DB 적재 진행 조회 API")
     @Operation(
             summary = "발급 결과와 DB 적재 진행 조회",
             description = "Redis 발급 결과 누적값과 DB 적재 진행을 함께 조회합니다.")
@@ -108,7 +105,6 @@ public class AdminCouponController {
     }
 
     @GetMapping("/{couponId}/notification-counts")
-    @Tag(name = "Notification", description = "관리자 알림 처리 현황 조회 API")
     @Operation(
             summary = "알림 처리 현황 조회",
             description = "회차별 발급 성공 알림의 전체·완료·대기·실패 건수를 조회합니다.")

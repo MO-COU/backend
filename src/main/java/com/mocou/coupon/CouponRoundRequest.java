@@ -1,5 +1,6 @@
 package com.mocou.coupon;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDateTime;
@@ -18,9 +19,21 @@ import java.time.LocalDateTime;
  * @param closeAt 발급 종료 시각. 비우면 {@code openAt} 당일 23:59:59
  * @param name 쿠폰 이름. 비우면 회차 번호로 만든다
  */
+@Schema(description = "관리자 쿠폰 회차 생성 요청")
 public record CouponRoundRequest(
-        @NotNull(message = "재고는 필수입니다") @Min(value = 1, message = "재고는 1 이상이어야 합니다")
+        @Schema(
+                        description = "회차의 총 발급 가능 수량",
+                        example = "10000",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                @NotNull(message = "재고는 필수입니다")
+                @Min(value = 1, message = "재고는 1 이상이어야 합니다")
                 Integer totalQuantity,
-        @NotNull(message = "발급 시작 시각은 필수입니다") LocalDateTime openAt,
-        LocalDateTime closeAt,
-        String name) {}
+        @Schema(
+                        description = "쿠폰 발급 시작 시각",
+                        example = "2026-08-28T09:00:00",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                @NotNull(message = "발급 시작 시각은 필수입니다")
+                LocalDateTime openAt,
+        @Schema(description = "쿠폰 발급 종료 시각. 생략하면 시작일 23:59:59", example = "2026-08-28T23:59:59")
+                LocalDateTime closeAt,
+        @Schema(description = "쿠폰 회차 이름. 생략하면 회차 번호", example = "여름 선착순 쿠폰") String name) {}

@@ -2,6 +2,7 @@ package com.mocou.loadtest;
 
 import com.mocou.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -14,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "관리자 부하 테스트", description = "k6 부하 테스트 실행과 상태 조회")
+@Tag(name = "부하 테스트 API", description = "k6 부하 테스트 실행·조회와 초기화 API")
 @RestController
 @RequestMapping("/api/admin/load-tests")
 public class LoadTestExecutionController {
@@ -63,7 +64,7 @@ public class LoadTestExecutionController {
     })
     @GetMapping("/{runId}")
     public ResponseEntity<ApiResponse<LoadTestRunResponse>> getResult(
-            @PathVariable long runId) {
+            @Parameter(description = "부하 테스트 실행 ID", example = "5") @PathVariable long runId) {
         return ResponseEntity.ok(ApiResponse.success(service.getResult(runId)));
     }
 }
