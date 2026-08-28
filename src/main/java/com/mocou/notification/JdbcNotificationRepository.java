@@ -86,7 +86,12 @@ public class JdbcNotificationRepository implements NotificationRepository {
             return List.of();
         }
 
-        List<PendingNotification> queued = tryBatchInsert(couponId, type, memberIds);
+        // 1건이면 배치 경로가 오히려 손해다 - 배치는 generated key를 못 받아와 id
+        // 재조회 SELECT가 하나 더 필요한데, save()는 KeyHolder로 그 왕복 없이 바로
+        // 얻는다. notifyMember(단건)가 notifyMembers(couponId, List.of(memberId))로
+        // 들어오는 경우가 많아 이 분기가 실제로 자주 탄다.
+        List<PendingNotification> queued =
+                memberIds.size() > 1 ? tryBatchInsert(couponId, type, memberIds) : null;
         if (queued != null) {
             return queued;
         }

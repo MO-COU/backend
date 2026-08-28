@@ -260,6 +260,24 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
         assertThat(notificationCount(MEMBER_ID_3, NotificationType.ISSUE_SUCCESS)).isEqualTo(1);
     }
 
+    // 1건짜리 saveBatch는 배치 경로(id 재조회 SELECT 포함)를 타지 않고 save()로 바로
+    // 처리된다(notifyMember가 항상 이 모양으로 호출함) - 여기서도 정상 큐잉되는지 확인한다.
+    @Test
+    @DisplayName("회원 1명짜리 saveBatch도 정상 큐잉된다")
+    void queuesSingleMemberWithoutBatchPath() {
+        // given
+        insertCouponAndMember(MEMBER_ID);
+
+        // when
+        List<PendingNotification> queued =
+                repository.saveBatch(COUPON_ID, NotificationType.ISSUE_SUCCESS, List.of(MEMBER_ID));
+
+        // then
+        assertThat(queued).extracting(PendingNotification::memberId).containsExactly(MEMBER_ID);
+        assertThat(queued.getFirst().notificationId()).isNotEqualTo(0L);
+        assertThat(notificationCount(MEMBER_ID, NotificationType.ISSUE_SUCCESS)).isEqualTo(1);
+    }
+
     @Test
     @DisplayName("빈 회원 목록으로 saveBatch를 호출하면 아무 것도 큐잉하지 않는다")
     void saveBatchWithEmptyMemberListDoesNothing() {

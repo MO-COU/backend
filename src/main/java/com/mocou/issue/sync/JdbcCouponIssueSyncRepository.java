@@ -104,7 +104,10 @@ public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository 
             return List.of();
         }
 
-        List<CouponIssueSyncEvent> savedEvents = trySaveBatch(couponId, events);
+        // 1건이면 배치 경로가 오히려 손해다 - 배치는 generated key를 못 받아와 id
+        // 재조회 SELECT가 하나 더 필요한데, saveOne은 KeyHolder로 그 왕복 없이 바로
+        // 얻는다. 그래서 1건일 땐 애초에 배치를 시도하지 않는다.
+        List<CouponIssueSyncEvent> savedEvents = events.size() > 1 ? trySaveBatch(couponId, events) : null;
         if (savedEvents == null) {
             savedEvents = saveOneByOne(events);
         }
