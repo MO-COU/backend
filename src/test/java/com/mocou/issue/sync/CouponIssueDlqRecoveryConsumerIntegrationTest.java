@@ -102,14 +102,14 @@ class CouponIssueDlqRecoveryConsumerIntegrationTest
     }
 
     @Test
-    @DisplayName("DLQ 복구마저 최종 한도를 넘기면 그때 보상하고 최종 실패로 기록한다")
-    void finalizesAndCompensatesWhenDlqRetryLimitExceeded() {
+    @DisplayName("DLQ 복구마저 최종 한도를 넘기면 보상 없이 failed 스트림으로 옮기고 최종 실패로 기록한다")
+    void movesToFailedStreamWhenDlqRetryLimitExceeded() {
         // given
         CouponIssueSyncProperties properties = new CouponIssueSyncProperties();
         properties.setDlqPendingMinIdleMs(100);
         properties.setDlqMaxDeliveryCount(3);
-        // 원본 예약 상태(재고 차감 + 발급 회원 등록)를 재현해, 여기서 비로소
-        // 보상되는지 끝까지 검증한다.
+        // 원본 예약 상태(재고 차감 + 발급 회원 등록)를 재현해, 보상 없이 그대로
+        // 남는지 끝까지 검증한다.
         setStock(5);
         redisTemplate.opsForZSet().add(issuedMembersKey(), "100", 1);
         gateway.ensureDlqConsumerGroup(COUPON_ID);
@@ -135,15 +135,16 @@ class CouponIssueDlqRecoveryConsumerIntegrationTest
         // then
         verify(repository, never()).saveBatch(anyLong(), anyList());
         verify(repository).recordFailure(eq(COUPON_ID), eq(100L), eq(ErrorCode.INTERNAL_ERROR), any());
-        assertThat(currentStock()).isEqualTo("6");
-        assertThat(redisTemplate.opsForZSet().score(issuedMembersKey(), "100")).isNull();
+        assertThat(currentStock()).isEqualTo("5");
+        assertThat(redisTemplate.opsForZSet().score(issuedMembersKey(), "100")).isEqualTo(1.0);
         assertThat(dlqPendingCount()).isZero();
         assertThat(redisTemplate.opsForStream().size(dlqStreamKey())).isZero();
+        assertThat(redisTemplate.opsForStream().size(dlqFailedStreamKey())).isEqualTo(1);
     }
 
     private CouponIssueDlqRecoveryConsumer newConsumer(CouponIssueSyncProperties properties) {
         return new CouponIssueDlqRecoveryConsumer(
-                gateway, issueGateway, repository, properties, streamGroupRecovery, activeCouponIdHolder);
+                gateway, repository, properties, streamGroupRecovery, activeCouponIdHolder);
     }
 
     // 이 클래스도 issueSequence/remainingAtIssue 값 자체를 검증하지 않는다 - DLQ 복구가

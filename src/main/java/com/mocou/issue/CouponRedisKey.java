@@ -54,6 +54,15 @@ public final class CouponRedisKey {
         return "coupon:{%d}:issue-dlq".formatted(couponId);
     }
 
+    /**
+     * DLQ 복구마저 재시도 한도를 넘겨 최종 실패로 확정된 이벤트를 보관하는 Stream Key.
+     * 이 스트림은 관리자가 확인할 때까지 삭제되지 않는다 - 관리자 조회 API의 조회 대상이다.
+     */
+    public static String issueDlqFailedStream(long couponId) {
+        validateCouponId(couponId);
+        return "coupon:{%d}:issue-dlq-failed".formatted(couponId);
+    }
+
     private static void validateCouponId(long couponId) {
         if (couponId <= 0) {
             throw new IllegalArgumentException("couponId는 양수여야 합니다.");

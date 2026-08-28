@@ -13,5 +13,6 @@ public enum NotificationType {
 
     // 관리자 대상 (member_id 없이 발송됨)
     STOCK_DEPLETED,         // 재고 0에 도달
-    VERIFICATION_FAILED     // 정합성 검증 실패 발생
+    VERIFICATION_FAILED,    // 정합성 검증 실패 발생
+    ISSUE_SYNC_FAILED       // DLQ 재시도까지 소진해 발급 동기화가 최종 실패했을 때 관리자에게 보내는 알림
 }

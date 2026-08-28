@@ -119,6 +119,7 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
                                 MEMBER_ID_1))
                 .isEqualTo(1);
         assertThat(pendingNotificationCount(COUPON_ID, MEMBER_ID_1, "ISSUE_FAILED")).isEqualTo(1);
+        assertThat(adminPendingNotificationCount(COUPON_ID, "ISSUE_SYNC_FAILED")).isEqualTo(1);
     }
 
     @Test
@@ -154,6 +155,16 @@ class JdbcCouponIssueSyncRepositoryIntegrationTest
                 Integer.class,
                 couponId,
                 memberId,
+                type);
+    }
+
+    /** 관리자 알림은 member_id 없이 큐잉되므로 별도 조회가 필요하다. */
+    private int adminPendingNotificationCount(long couponId, String type) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM notification "
+                        + "WHERE coupon_id = ? AND member_id IS NULL AND type = ? AND status = 'PENDING'",
+                Integer.class,
+                couponId,
                 type);
     }
 

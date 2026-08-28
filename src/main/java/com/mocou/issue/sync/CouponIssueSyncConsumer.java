@@ -6,7 +6,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.RedisSystemException;
@@ -252,7 +251,7 @@ public class CouponIssueSyncConsumer {
         streamGroupRecovery.moveEntries(streamKey, dlqStreamKey, GROUP_NAME, recordIds);
 
         for (MapRecord<String, String, String> record : claimed) {
-            CouponIssueSyncEvent event = parse(record);
+            CouponIssueSyncEvent event = CouponIssueSyncEventParser.parse(record);
             try {
                 repository.recordRetryEscalation(
                         event.couponId(),
@@ -294,7 +293,8 @@ public class CouponIssueSyncConsumer {
             return;
         }
 
-        List<CouponIssueSyncEvent> events = buffer.records.stream().map(this::parse).toList();
+        List<CouponIssueSyncEvent> events =
+                buffer.records.stream().map(CouponIssueSyncEventParser::parse).toList();
 
         // saveBatch가 커밋까지 끝난 뒤에만 XACK한다 — 순서가 바뀌면 "ACK는 됐는데
         // 크래시로 DB엔 없는" 영구 유실이 생긴다. 여기서 예외를 안 잡는 이유도 같다:
@@ -320,25 +320,6 @@ public class CouponIssueSyncConsumer {
      */
     private void acknowledgeAndDelete(String streamKey, String[] recordIds) {
         streamGroupRecovery.acknowledgeAndDelete(streamKey, GROUP_NAME, recordIds);
-    }
-
-    private CouponIssueSyncEvent parse(MapRecord<String, String, String> record) {
-        Map<String, String> fields = record.getValue();
-        return new CouponIssueSyncEvent(
-                record.getId(),
-                Long.parseLong(fields.get("couponId")),
-                Long.parseLong(fields.get("memberId")),
-                fields.get("eventId"),
-                Long.parseLong(fields.get("issueSequence")),
-                Long.parseLong(fields.get("remainingAtIssue")),
-                toIssuedAt(Long.parseLong(fields.get("reservedAtEpochSecond"))));
-    }
-
-    /** Lua가 기록한 epoch초(timezone 없음)를 Asia/Seoul 기준 LocalDateTime으로 되돌린다. */
-    private LocalDateTime toIssuedAt(long reservedAtEpochSecond) {
-        return Instant.ofEpochSecond(reservedAtEpochSecond)
-                .atZone(COUPON_TIME_ZONE)
-                .toLocalDateTime();
     }
 
     /** 지금 누적 중인 배치 상태. */
