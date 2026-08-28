@@ -30,10 +30,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class JdbcCouponIssueSyncRepository implements CouponIssueSyncRepository {
 
+    // 호출부가 getFirst()로 첫 행을 집으므로 목록에 순서가 있어야 한다. 정렬 없는 결과에서
+    // 첫 행을 고르면 무엇이 뽑힐지 보장되지 않는다 - 지금은 풀스캔이라 사실상 PK 순이지만
+    // 실행계획이 바뀌면 달라진다.
     private static final String FIND_OPEN_COUPON_IDS = """
             SELECT coupon_id
             FROM coupon
             WHERE status = 'OPEN'
+            ORDER BY coupon_id
             """;
 
     private static final String INSERT_COUPON_ISSUE = """

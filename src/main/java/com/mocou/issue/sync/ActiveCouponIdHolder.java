@@ -44,6 +44,23 @@ class ActiveCouponIdHolder {
         activeCouponId = event.couponId();
     }
 
+    /**
+     * 회차가 지워지면 대상을 다시 정한다.
+     *
+     * <p>지워진 쿠폰은 이미 {@code OPEN} 목록에 없으므로 {@link #init}이 알아서 다른 쿠폰(없으면
+     * {@code null})을 고른다. 그래서 삭제하는 쪽이 "다음 대상이 누구인지"를 알 필요가 없다.
+     *
+     * <p>지운 쿠폰을 계속 가리키면 컨슈머가 {@code NOGROUP}을 감지해 그룹을 다시 만들면서 방금
+     * 지운 스트림 키가 되살아난다.
+     *
+     * <p>진행 중인 부하 테스트의 대상이 여기서 밀려날 걱정은 없다. 삭제 자체가 부하 테스트가 도는
+     * 동안에는 거부되기 때문이다({@code CouponRoundService.rejectIfLoadTestRunning}).
+     */
+    @EventListener
+    void onCouponRoundDeleted(CouponRoundDeletedEvent event) {
+        init();
+    }
+
     Long get() {
         return activeCouponId;
     }
