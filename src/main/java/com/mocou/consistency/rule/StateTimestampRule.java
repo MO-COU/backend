@@ -51,8 +51,29 @@ class StateTimestampRule implements ConsistencyRule {
             JOIN member m ON m.member_id = i.member_id
             """;
 
+    /**
+     * 조인을 hash join으로 유도하는 힌트.
+     *
+     * <p>조건 8개 중 {@code ISSUED_BEFORE_SIGNUP} 하나가 member를 필요로 해 발급 300만 행 전체가 member와
+     * 조인되는데, 옵티마이저는 이 조인을 Nested loop으로 푼다 — member 100만을 훑으며 한 명당 발급 몇 건을
+     * {@code idx_issue_member}로 랜덤 접근한다(세컨더리 인덱스에서 본체로 300만 회 왕복, 실측 25초).
+     * 조인용 인덱스를 막으면 양쪽을 한 번씩 순차 스캔해 해시로 맞추고, 같은 검사가 2.4초에 끝난다.
+     *
+     * <p>옵티마이저가 hash join을 스스로 고르지 못하는 이유는 비용 모델이 그것을 9만 배 비싸다고
+     * 추정하기 때문이다(추정 296e+9 vs 3.25e+6 — 실측은 반대로 10배 빠르다). 랜덤 접근의 실비용이
+     * 모델에 덜 반영돼 있다.
+     *
+     * <p>데이터가 늘어도 이 선택은 뒤집히지 않는다. {@code OR} 조건이 두 테이블에 걸쳐 있어 인덱스로 행을
+     * 미리 거를 수 없고, 양쪽 풀스캔이 구조적으로 불가피하다. 풀스캔이 전제라면 hash join이 항상 낫다.
+     *
+     * <p>{@code IGNORE INDEX}가 아니라 옵티마이저 힌트를 쓴다. 전자는 인덱스 이름이 바뀌면 쿼리가 오류로
+     * 죽지만, 힌트는 경고만 내고 무시되어 느려질 뿐 죽지 않는다. 검증 도구는 죽지 않는 쪽이 우선이다.
+     */
+    private static final String HASH_JOIN_HINT =
+            "/*+ NO_INDEX(i idx_issue_member) NO_INDEX(m PRIMARY) */ ";
+
     private static final String VIOLATION_COUNT_SQL =
-            "SELECT COUNT(*) " + FROM + CONDITION;
+            "SELECT " + HASH_JOIN_HINT + "COUNT(*) " + FROM + CONDITION;
 
     /**
      * {@code CONCAT_WS}는 {@code NULL} 인자를 건너뛴다. 조건에 걸리지 않은 항목은 {@code CASE}가
@@ -63,8 +84,10 @@ class StateTimestampRule implements ConsistencyRule {
      * 장황해 보여도 300만 행을 임시 테이블로 만들지 않고 스캔하면서 걸러낸다.
      */
     private static final String VIOLATION_SQL =
-            """
-            SELECT i.coupon_issue_id,
+            "SELECT "
+                    + HASH_JOIN_HINT
+                    + """
+                    i.coupon_issue_id,
                    CONCAT_WS(',',
                      CASE WHEN i.status = 'USED' AND i.used_at IS NULL
                           THEN 'USED_WITHOUT_TIMESTAMP' END,
