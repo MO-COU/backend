@@ -64,6 +64,12 @@ services:
       SERVER_TOMCAT_MAX_CONNECTIONS: ${SERVER_TOMCAT_MAX_CONNECTIONS:-30000}
       SERVER_TOMCAT_ACCEPT_COUNT: ${SERVER_TOMCAT_ACCEPT_COUNT:-2000}
       SERVER_TOMCAT_THREADS_MAX: ${SERVER_TOMCAT_THREADS_MAX:-400}
+
+      # MySQL 커넥션 풀 크기. MySQL 자체 max_connections(기본 151)를 넘지 않게 잡는다.
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:-16}
+
+      # 부하테스트 후 Redis→DB 적재 완료 대기 시간(초). 발급량이 클수록 더 걸릴 수 있다.
+      MOCOU_LOADTEST_DB_SYNC_TIMEOUT_SECONDS: ${MOCOU_LOADTEST_DB_SYNC_TIMEOUT_SECONDS:-60}
     volumes:
       # Logback 기본 경로(/app/logs)를 named volume에 보관해 앱 컨테이너 교체 뒤에도 오류 로그를 유지한다.
       - app-logs:/app/logs
