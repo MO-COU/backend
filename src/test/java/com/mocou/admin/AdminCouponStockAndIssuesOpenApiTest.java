@@ -18,7 +18,8 @@ class AdminCouponStockAndIssuesOpenApiTest {
     void documentsStockOperation() throws Exception {
         Method method = AdminCouponController.class.getMethod("getStock", long.class);
 
-        assertThat(method.getAnnotation(Tag.class).name()).isEqualTo("Admin Coupon");
+        assertThat(AdminCouponController.class.getAnnotation(Tag.class).name())
+                .isEqualTo("관리자 쿠폰·대시보드 API");
         assertThat(method.getAnnotation(Operation.class).summary()).isEqualTo("쿠폰 재고 조회");
         assertThat(responseCodes(method)).containsExactlyInAnyOrder("200", "400", "404", "503");
         assertThat(method.getParameterAnnotations()[0])
@@ -37,8 +38,11 @@ class AdminCouponStockAndIssuesOpenApiTest {
                 AdminCouponController.class.getMethod(
                         "getIssues", long.class, int.class, int.class);
 
-        assertThat(method.getAnnotation(Tag.class).name()).isEqualTo("Admin Coupon");
+        assertThat(AdminCouponController.class.getAnnotation(Tag.class).name())
+                .isEqualTo("관리자 쿠폰·대시보드 API");
         assertThat(method.getAnnotation(Operation.class).summary()).isEqualTo("쿠폰 발급 이력 조회");
+        assertThat(method.getAnnotation(Operation.class).description())
+                .contains("선착순 발급 순번", "순번이 없는 기존 이력은 마지막");
         assertThat(responseCodes(method)).containsExactlyInAnyOrder("200", "400", "404");
         assertThat(Arrays.stream(method.getParameterAnnotations())
                         .flatMap(Arrays::stream)

@@ -15,4 +15,7 @@ public interface AdminCouponRepository {
     long countIssues(long couponId);
 
     List<AdminCouponIssue> findIssues(long couponId, int size, long offset);
+
+    /** DLQ 최종 실패(INTERNAL_ERROR)로 기록된 issue_failure_log 항목. 회원당 최신 1건만 담는다. */
+    List<AdminCouponFailureLogEntry> findDlqFailureLogs(long couponId);
 }

@@ -76,6 +76,7 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
 
     @Override
     public List<AdminCouponIssue> findIssues(long couponId, int size, long offset) {
+        // 발급 순번은 오름차순, NULL인 기존 이력은 마지막으로 조회함.
         return jdbcTemplate.query(
                 "SELECT ci.coupon_issue_id, ci.coupon_id, ci.member_id, "
                         + "m.name AS member_name, m.email AS member_email, "
@@ -83,7 +84,8 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
                         + "ci.expires_at, ci.issue_sequence, ci.remaining_at_issue FROM coupon_issue ci "
                         + "JOIN member m ON m.member_id = ci.member_id "
                         + "WHERE ci.coupon_id = ? "
-                        + "ORDER BY ci.issued_at DESC, ci.coupon_issue_id DESC LIMIT ? OFFSET ?",
+                        + "ORDER BY ci.issue_sequence IS NULL ASC, ci.issue_sequence ASC, "
+                        + "ci.coupon_issue_id ASC LIMIT ? OFFSET ?",
                 (resultSet, rowNumber) ->
                         AdminCouponIssue.withMaskedMember(
                                 resultSet.getLong("coupon_issue_id"),
@@ -101,6 +103,20 @@ public class JdbcAdminCouponRepository implements AdminCouponRepository {
                 couponId,
                 size,
                 offset);
+    }
+
+    @Override
+    public List<AdminCouponFailureLogEntry> findDlqFailureLogs(long couponId) {
+        return jdbcTemplate.query(
+                "SELECT member_id, failure_reason, occurred_at FROM issue_failure_log "
+                        + "WHERE coupon_id = ? AND failure_reason = 'INTERNAL_ERROR' "
+                        + "ORDER BY occurred_at DESC",
+                (resultSet, rowNumber) ->
+                        new AdminCouponFailureLogEntry(
+                                resultSet.getLong("member_id"),
+                                resultSet.getString("failure_reason"),
+                                resultSet.getTimestamp("occurred_at").toLocalDateTime()),
+                couponId);
     }
 
     private static java.time.LocalDateTime toLocalDateTime(Timestamp timestamp) {

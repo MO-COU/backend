@@ -85,8 +85,8 @@ mocou:
 
 | API | 설명 |
 | --- | --- |
-| `GET /internal/lifecycle/expiration-scheduler` | 현재 자동 실행 상태를 조회한다. |
-| `PUT /internal/lifecycle/expiration-scheduler` | 요청 본문의 `enabled` 값으로 자동 실행 상태를 변경한다. |
+| `GET /api/internal/lifecycle/expiration-scheduler` | 현재 자동 실행 상태를 조회한다. |
+| `PUT /api/internal/lifecycle/expiration-scheduler` | 요청 본문의 `enabled` 값으로 자동 실행 상태를 변경한다. |
 
 ```json
 {

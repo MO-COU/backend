@@ -32,7 +32,7 @@ class ExpirationSchedulerControlControllerTest {
     @Test
     @DisplayName("현재 만료 스케줄러 자동 실행 상태를 공통 응답 형식으로 조회한다")
     void getsCurrentSchedulerState() throws Exception {
-        mockMvc.perform(get("/internal/lifecycle/expiration-scheduler"))
+        mockMvc.perform(get("/api/internal/lifecycle/expiration-scheduler"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.enabled").value(false));
@@ -42,14 +42,14 @@ class ExpirationSchedulerControlControllerTest {
     @DisplayName("만료 스케줄러 자동 실행 상태를 변경하고 변경된 상태를 반환한다")
     void changesSchedulerState() throws Exception {
         mockMvc.perform(
-                        put("/internal/lifecycle/expiration-scheduler")
+                        put("/api/internal/lifecycle/expiration-scheduler")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"enabled\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.enabled").value(true));
 
-        mockMvc.perform(get("/internal/lifecycle/expiration-scheduler"))
+        mockMvc.perform(get("/api/internal/lifecycle/expiration-scheduler"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.enabled").value(true));
     }
@@ -58,7 +58,7 @@ class ExpirationSchedulerControlControllerTest {
     @DisplayName("자동 실행 상태가 없으면 공통 입력 오류 응답을 반환한다")
     void rejectsRequestWithoutEnabledState() throws Exception {
         mockMvc.perform(
-                        put("/internal/lifecycle/expiration-scheduler")
+                        put("/api/internal/lifecycle/expiration-scheduler")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{}"))
                 .andExpect(status().isBadRequest())

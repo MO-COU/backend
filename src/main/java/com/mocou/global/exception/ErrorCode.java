@@ -67,8 +67,12 @@ public enum ErrorCode {
     //    아니라 CouponIssueSyncConsumer가 여기서는 알림을 보내지 않는다.
     SYNC_RETRY_LIMIT_EXCEEDED(HttpStatus.INTERNAL_SERVER_ERROR, "발급 동기화 재시도 한도를 초과해 DLQ로 이동했습니다"),
     // 2) DLQ 복구마저 자체 한도를 넘겨 최종 포기한 시점. CouponIssueDlqRecoveryConsumer가
-    //    여기서 재고를 보상하고 이 사유로 기록한 뒤 회원에게 실패 알림을 보낸다.
-    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "쿠폰 발급 동기화에 실패했습니다");
+    //    Redis Stream 상태를 failed로 옮기고 이 사유로 기록한 뒤 회원·관리자에게 알린다.
+    //    재고는 더 이상 여기서 자동 보상하지 않는다 - 관리자가 확인 후 직접 처리한다.
+    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "쿠폰 발급 동기화에 실패했습니다"),
+    // 관리자가 DLQ 실패 목록에서 재시도를 요청했지만 해당 recordId가 이미 처리됐거나
+    // (다른 관리자가 먼저 재시도) 잘못된 값인 경우.
+    ISSUE_DLQ_FAILURE_NOT_FOUND(HttpStatus.NOT_FOUND, "DLQ 실패 목록에서 해당 항목을 찾을 수 없습니다");
 
     private final HttpStatus status;
     private final String message;

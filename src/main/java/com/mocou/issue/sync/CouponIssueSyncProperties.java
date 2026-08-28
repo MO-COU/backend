@@ -17,10 +17,10 @@ import org.springframework.validation.annotation.Validated;
 public class CouponIssueSyncProperties {
 
     @Min(1)
-    private int chunkSize = 100;
+    private int chunkSize = 500;
 
     @Min(1)
-    private long batchWindowMs = 5_000;
+    private long batchWindowMs = 3_000;
 
     // batchWindowMs보다 한참 커야 한다 — 로컬 버퍼에서 정상적으로 누적 중인
     // 엔트리(최대 batchWindowMs 동안 PEL에 안 ACK된 채로 있는 게 정상)를

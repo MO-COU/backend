@@ -41,9 +41,13 @@ public interface CouponIssueSyncRepository {
 
     /**
      * DLQ 복구마저 자체 재시도 한도를 넘겨 더 이상 재처리하지 않기로 최종 포기한
-     * 이벤트를 {@code issue_failure_log}에 남기고 회원에게 실패 알림을 보낸다.
-     * Redis 재고 보상(compensate)과 짝을 이루는 호출로, 호출부는 이 저장소 호출
-     * 전에 이미 보상을 마친 상태다.
+     * 이벤트를 {@code issue_failure_log}에 남기고 회원과 관리자에게 각각 알림을 보낸다.
+     * Redis 재고는 더 이상 여기서 보상하지 않는다 — 예약을 그대로 남겨 관리자가
+     * DLQ 실패 목록 조회 API로 확인한 뒤 직접 처리한다.
+     *
+     * <p>호출부(DLQ 복구 컨슈머)는 이 메서드를 부르기 전에 이미 Redis Stream의
+     * failed 큐로 엔트리를 옮겨둔 상태다 — 여기서 예외가 나도(DB 장애 등) Redis
+     * 쪽 최종 실패 상태는 이미 확정돼 있으므로 호출부는 best-effort로만 처리한다.
      */
     void recordFailure(long couponId, long memberId, ErrorCode failureReason, LocalDateTime occurredAt);
 
