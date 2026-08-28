@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.dao.DataAccessException;
@@ -76,6 +77,85 @@ public class JdbcNotificationRepository implements NotificationRepository {
             log.error("알림 큐잉(insert)에 실패했습니다. type={}, coupon_id={}, member_id={}",
                     notification.type(), notification.couponId(), notification.memberId(), e);
             throw new BusinessException(ErrorCode.NOTIFICATION_QUEUE_FAILED);
+        }
+    }
+
+    @Override
+    public List<PendingNotification> saveBatch(long couponId, NotificationType type, List<Long> memberIds) {
+        if (memberIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<PendingNotification> queued = tryBatchInsert(couponId, type, memberIds);
+        if (queued != null) {
+            return queued;
+        }
+
+        List<PendingNotification> savedOneByOne = new ArrayList<>();
+        for (Long memberId : memberIds) {
+            Long notificationId =
+                    save(new NotificationRecord(couponId, memberId, type, NotificationStatus.PENDING, null));
+            if (notificationId == null) {
+                continue;
+            }
+            savedOneByOne.add(new PendingNotification(notificationId, couponId, memberId, type, 0));
+        }
+        return savedOneByOne;
+    }
+
+    /**
+     * notification을 addBatch/executeBatch로 한 번에 넣어보고, 성공하면 방금 넣은
+     * notification_id를 다시 조회해 돌려준다.
+     *
+     * <p>{@code rewriteBatchedStatements=true}(local/prod 데이터소스 URL에 설정됨)에서
+     * MySQL 드라이버가 이 addBatch 호출들을 진짜 하나의 multi-row INSERT 문으로
+     * 재작성해 보낸다 — 그래서 한 행이라도 uk_notification_target 위반이면 그 문장
+     * 전체가 원자적으로 실패하고 아무 행도 반영되지 않는다. 이 전제 덕분에 실패 시
+     * 통째로 건별 폴백(save 반복)으로 넘어갈 수 있다.
+     *
+     * <p>배치 INSERT 자체가 아니라 그 뒤 id 재조회가 실패하는 경우는 여기서 잡아 빈
+     * 목록을 돌려준다(건별 폴백으로 넘기지 않는다) — INSERT는 이미 성공해 커밋될
+     * 것이므로 데이터는 정상이고, 다만 커밋 직후 즉시 발송 대상 id를 못 얻을 뿐이라
+     * 안전망 폴링({@link #findPending})이 나중에 그대로 집어간다. 여기서 건별
+     * 폴백으로 넘기면 이미 들어간 행을 save()가 중복으로 오인해 전부 건너뛰고, 즉시
+     * 발송 기회 자체가 통째로 사라진다.
+     *
+     * @return 배치가 전부 성공하면 큐잉된 목록(id 재조회 실패 시 빈 목록), 배치
+     *     INSERT 자체가 실패(주로 재전달 중복)하면 null
+     */
+    private List<PendingNotification> tryBatchInsert(long couponId, NotificationType type, List<Long> memberIds) {
+        try {
+            List<Object[]> batchArgs = memberIds.stream()
+                    .map(memberId -> new Object[] {couponId, memberId, type.name()})
+                    .toList();
+            jdbcTemplate.batchUpdate(
+                    "INSERT INTO notification (coupon_id, member_id, type, status, sent_at, created_at) "
+                            + "VALUES (?, ?, ?, 'PENDING', NULL, CURRENT_TIMESTAMP)",
+                    batchArgs);
+        } catch (DataAccessException exception) {
+            return null;
+        }
+
+        return findQueued(couponId, type, memberIds);
+    }
+
+    private List<PendingNotification> findQueued(long couponId, NotificationType type, List<Long> memberIds) {
+        try {
+            return namedParameterJdbcTemplate.query(
+                    "SELECT notification_id, member_id FROM notification "
+                            + "WHERE coupon_id = :couponId AND type = :type AND member_id IN (:memberIds)",
+                    new MapSqlParameterSource()
+                            .addValue("couponId", couponId)
+                            .addValue("type", type.name())
+                            .addValue("memberIds", memberIds),
+                    (rs, rowNum) -> new PendingNotification(
+                            rs.getLong("notification_id"), couponId, rs.getLong("member_id"), type, 0));
+        } catch (DataAccessException e) {
+            log.warn(
+                    "알림 배치 큐잉은 성공했지만 즉시 발송용 id 조회에 실패해 안전망 폴링으로 넘어간다. "
+                            + "couponId={}, type={}",
+                    couponId, type, e);
+            return List.of();
         }
     }
 

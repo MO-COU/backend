@@ -25,6 +25,15 @@ public interface NotificationRepository {
     Long save(NotificationRecord notification);
 
     /**
+     * outbox: 같은 회차·같은 알림 종류로 여러 회원에게 보낼 PENDING 알림을 한 번에
+     * 큐잉한다. 배치 INSERT를 먼저 시도하고, 실패하면(주로 uk_notification_target
+     * 재전달 중복) {@link #save}를 건별로 반복하는 방식으로 폴백한다.
+     *
+     * @return 새로 큐잉된 것만 담은 목록 - 중복으로 skip된 memberId는 빠진다.
+     */
+    List<PendingNotification> saveBatch(long couponId, NotificationType type, List<Long> memberIds);
+
+    /**
      * outbox: 아직 발송 안 된(PENDING) 알림을 오래된 순으로 가져온다.
      *
      * <p>{@code createdBefore} 이후에 생성된 row는 제외한다 - 커밋 직후 즉시 발송 경로가 방금

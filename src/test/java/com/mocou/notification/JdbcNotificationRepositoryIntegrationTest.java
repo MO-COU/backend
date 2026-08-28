@@ -212,6 +212,60 @@ class JdbcNotificationRepositoryIntegrationTest extends MySqlContainerTest {
                         error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.NOTIFICATION_QUEUE_FAILED));
     }
 
+    // outbox: saveBatch는 addBatch/executeBatch를 먼저 시도한다 - 전부 새 대상이면
+    // 이 배치 경로 하나로 끝나야 한다.
+    @Test
+    @DisplayName("여러 회원을 saveBatch로 큐잉하면 전부 새로 큐잉되고 즉시 발송용 id가 채워진다")
+    void queuesNewMembersInOneBatch() {
+        // given
+        insertCouponAndMember(MEMBER_ID);
+        insertCouponAndMember(MEMBER_ID_2);
+        insertCouponAndMember(MEMBER_ID_3);
+
+        // when
+        List<PendingNotification> queued = repository.saveBatch(
+                COUPON_ID, NotificationType.ISSUE_SUCCESS, List.of(MEMBER_ID, MEMBER_ID_2, MEMBER_ID_3));
+
+        // then
+        assertThat(queued)
+                .extracting(PendingNotification::memberId)
+                .containsExactlyInAnyOrder(MEMBER_ID, MEMBER_ID_2, MEMBER_ID_3);
+        assertThat(queued).extracting(PendingNotification::notificationId).doesNotContainNull();
+        assertThat(notificationCount(MEMBER_ID, NotificationType.ISSUE_SUCCESS)).isEqualTo(1);
+        assertThat(notificationCount(MEMBER_ID_2, NotificationType.ISSUE_SUCCESS)).isEqualTo(1);
+        assertThat(notificationCount(MEMBER_ID_3, NotificationType.ISSUE_SUCCESS)).isEqualTo(1);
+    }
+
+    // outbox: 재전달 등으로 대상 중 일부가 이미 큐잉돼 있으면(uk_notification_target 위반)
+    // 배치 INSERT 문 전체가 실패하므로 건별 save()로 폴백해 새 대상만 정확히 큐잉해야 한다.
+    @Test
+    @DisplayName("이미 큐잉된 대상이 섞여 있으면 배치가 실패해 건별 폴백으로 새 대상만 큐잉한다")
+    void fallsBackToOneByOneWhenBatchHasDuplicateTarget() {
+        // given
+        insertCouponAndMember(MEMBER_ID);
+        insertCouponAndMember(MEMBER_ID_2);
+        insertCouponAndMember(MEMBER_ID_3);
+        repository.save(record(MEMBER_ID_2, NotificationType.ISSUE_SUCCESS));
+
+        // when
+        List<PendingNotification> queued = repository.saveBatch(
+                COUPON_ID, NotificationType.ISSUE_SUCCESS, List.of(MEMBER_ID, MEMBER_ID_2, MEMBER_ID_3));
+
+        // then
+        assertThat(queued)
+                .extracting(PendingNotification::memberId)
+                .containsExactlyInAnyOrder(MEMBER_ID, MEMBER_ID_3);
+        assertThat(notificationCount(MEMBER_ID, NotificationType.ISSUE_SUCCESS)).isEqualTo(1);
+        assertThat(notificationCount(MEMBER_ID_2, NotificationType.ISSUE_SUCCESS)).isEqualTo(1);
+        assertThat(notificationCount(MEMBER_ID_3, NotificationType.ISSUE_SUCCESS)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("빈 회원 목록으로 saveBatch를 호출하면 아무 것도 큐잉하지 않는다")
+    void saveBatchWithEmptyMemberListDoesNothing() {
+        assertThat(repository.saveBatch(COUPON_ID, NotificationType.ISSUE_SUCCESS, List.of())).isEmpty();
+    }
+
     private String statusOf(long notificationId) {
         return jdbcTemplate.queryForObject(
                 "SELECT status FROM notification WHERE notification_id = ?", String.class, notificationId);

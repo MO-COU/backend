@@ -2,6 +2,7 @@ package com.mocou.notification;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,22 +30,17 @@ class MockNotificationServiceTest {
     @Mock private NotificationDispatchConsumer dispatchConsumer;
     @InjectMocks private MockNotificationService service;
 
+    // 회원 대상 알림(notifyMember/notifyMembers)은 saveBatch(배치 우선 시도 + 건별 폴백)를
+    // 거친다 - save() 건별 호출은 notifyAdmin 전용이다.
     @Test
-    @DisplayName("회원 알림은 coupon/member id를 채워 PENDING으로 큐잉한다")
+    @DisplayName("회원 알림은 coupon/member id로 saveBatch를 호출한다")
     void notifiesMemberByQueuingAsPending() {
         // when
         service.notifyMember(NotificationType.ISSUE_SUCCESS, COUPON_ID, MEMBER_ID);
 
         // then
         verify(notificationRepository)
-                .save(
-                        argThat(
-                                record ->
-                                        record.couponId().equals(COUPON_ID)
-                                                && record.memberId().equals(MEMBER_ID)
-                                                && record.type() == NotificationType.ISSUE_SUCCESS
-                                                && record.status() == NotificationStatus.PENDING
-                                                && record.sentAt() == null));
+                .saveBatch(COUPON_ID, NotificationType.ISSUE_SUCCESS, List.of(MEMBER_ID));
     }
 
     @Test
@@ -87,7 +83,9 @@ class MockNotificationServiceTest {
     @DisplayName("큐잉에 성공하고 디스패처가 떠 있으면 즉시 발송을 시도한다")
     void triggersImmediateDispatchWhenConsumerAvailable() {
         // given
-        given(notificationRepository.save(any())).willReturn(42L);
+        given(notificationRepository.saveBatch(eq(COUPON_ID), eq(NotificationType.ISSUE_SUCCESS), any()))
+                .willReturn(List.of(
+                        new PendingNotification(42L, COUPON_ID, MEMBER_ID, NotificationType.ISSUE_SUCCESS, 0)));
         given(dispatchConsumerProvider.getIfAvailable()).willReturn(dispatchConsumer);
 
         // when
@@ -107,13 +105,18 @@ class MockNotificationServiceTest {
     }
 
     // outbox: saveBatch처럼 한 번에 여러 회원에게 같은 알림을 큐잉하는 곳 전용 - 큐잉은
-    // 건별이지만 즉시 발송 시도는 이 호출에서 나온 건들을 묶어 한 번에 넘어가야 한다.
+    // 배치 한 번이지만(또는 폴백 시 건별) 즉시 발송 시도는 이 호출에서 나온 건들을 묶어
+    // 한 번에 넘어가야 한다.
     @Test
     @DisplayName("여러 회원에게 큐잉하면 즉시 발송도 그 건들을 한 번에 묶어 넘긴다")
     void triggersImmediateDispatchAsSingleBatchForMultipleMembers() {
         // given
         long memberId2 = 1002L;
-        given(notificationRepository.save(any())).willReturn(42L, 43L);
+        given(notificationRepository.saveBatch(
+                        eq(COUPON_ID), eq(NotificationType.ISSUE_SUCCESS), eq(List.of(MEMBER_ID, memberId2))))
+                .willReturn(List.of(
+                        new PendingNotification(42L, COUPON_ID, MEMBER_ID, NotificationType.ISSUE_SUCCESS, 0),
+                        new PendingNotification(43L, COUPON_ID, memberId2, NotificationType.ISSUE_SUCCESS, 0)));
         given(dispatchConsumerProvider.getIfAvailable()).willReturn(dispatchConsumer);
 
         // when
@@ -133,7 +136,9 @@ class MockNotificationServiceTest {
     @DisplayName("디스패처가 꺼져 있으면 즉시 발송을 시도하지 않고 PENDING으로만 남긴다")
     void skipsImmediateDispatchWhenDispatcherDisabled() {
         // given
-        given(notificationRepository.save(any())).willReturn(42L);
+        given(notificationRepository.saveBatch(eq(COUPON_ID), eq(NotificationType.ISSUE_SUCCESS), any()))
+                .willReturn(List.of(
+                        new PendingNotification(42L, COUPON_ID, MEMBER_ID, NotificationType.ISSUE_SUCCESS, 0)));
         given(dispatchConsumerProvider.getIfAvailable()).willReturn(null);
 
         // when, then (예외 없이 조용히 끝나야 한다)
@@ -145,7 +150,8 @@ class MockNotificationServiceTest {
     @DisplayName("중복이라 큐잉 자체가 skip되면 즉시 발송도 시도하지 않는다")
     void skipsImmediateDispatchWhenSaveIsDuplicate() {
         // given
-        given(notificationRepository.save(any())).willReturn(null);
+        given(notificationRepository.saveBatch(eq(COUPON_ID), eq(NotificationType.ISSUE_SUCCESS), any()))
+                .willReturn(List.of());
 
         // when
         service.notifyMember(NotificationType.ISSUE_SUCCESS, COUPON_ID, MEMBER_ID);

@@ -1,6 +1,5 @@
 package com.mocou.notification;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.beans.factory.ObjectProvider;
@@ -40,28 +39,25 @@ public class MockNotificationService implements NotificationSender {
 
     @Override
     public void notifyAdmin(NotificationType type, Long couponId) {
-        queueAndDispatch(List.of(new NotificationRecord(couponId, null, type, NotificationStatus.PENDING, null)));
+        Long notificationId =
+                notificationRepository.save(
+                        new NotificationRecord(couponId, null, type, NotificationStatus.PENDING, null));
+        if (notificationId == null) {
+            // uk_notification_target 중복 - 이미 큐잉된 적 있으니 이 건은 새로 발송을 시도할 대상이 아니다.
+            return;
+        }
+        dispatch(List.of(new PendingNotification(notificationId, couponId, null, type, 0)));
     }
 
     @Override
     public void notifyMembers(NotificationType type, long couponId, List<Long> memberIds) {
-        List<NotificationRecord> records = memberIds.stream()
-                .map(memberId -> new NotificationRecord(couponId, memberId, type, NotificationStatus.PENDING, null))
-                .toList();
-        queueAndDispatch(records);
+        if (memberIds.isEmpty()) {
+            return;
+        }
+        dispatch(notificationRepository.saveBatch(couponId, type, memberIds));
     }
 
-    private void queueAndDispatch(List<NotificationRecord> records) {
-        List<PendingNotification> queued = new ArrayList<>();
-        for (NotificationRecord record : records) {
-            Long notificationId = notificationRepository.save(record);
-            if (notificationId == null) {
-                // uk_notification_target 중복 - 이미 큐잉된 적 있으니 이 건은 새로 발송을 시도할 대상이 아니다.
-                continue;
-            }
-            queued.add(new PendingNotification(
-                    notificationId, record.couponId(), record.memberId(), record.type(), 0));
-        }
+    private void dispatch(List<PendingNotification> queued) {
         if (queued.isEmpty()) {
             return;
         }
