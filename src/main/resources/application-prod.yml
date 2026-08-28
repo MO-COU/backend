@@ -16,6 +16,11 @@ spring:
       ddl-auto: validate
     # 기본값(true)로 두면 요청이 끝날 때까지 커넥션을 계속 붙잡는다(Open Session In View).
     open-in-view: false
+  datasource:
+    hikari:
+      # 기본값(10)은 부하테스트 중 재고 조회·정합성 검증 쿼리까지 겹치면 병목이 된다.
+      # MySQL 자체의 max_connections(기본 151)를 넘지 않게 잡는다.
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:16}
 
 mocou:
   issue:
@@ -29,3 +34,8 @@ mocou:
       # 꺼진 채로 배포하면 알림이 notification 테이블에 PENDING으로만 쌓이고 발송되지 않는다.
       # created_at 나이 필터로 즉시 발송 경로와의 이중 발송 경쟁 상태를 막아둔 뒤에만 켠다.
       enabled: true
+  loadtest:
+    db-sync:
+      # 2만 건 기준 60초로 충분했지만 V3(5만 VU)는 DB 반영량이 커서 더 걸릴 수 있다.
+      # 코드 배포 없이 EC2 .env만 바꿔 튜닝할 수 있게 env로 뺀다.
+      timeout-seconds: ${MOCOU_LOADTEST_DB_SYNC_TIMEOUT_SECONDS:60}

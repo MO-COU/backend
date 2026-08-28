@@ -5,6 +5,7 @@ import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
 import java.time.Duration;
 import java.time.Instant;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -16,19 +17,23 @@ import org.springframework.stereotype.Component;
 public class LoadTestDbSyncMonitor {
 
     private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
-    private static final Duration TIMEOUT = Duration.ofSeconds(60);
 
     private final JdbcTemplate jdbcTemplate;
     private final StringRedisTemplate redisTemplate;
+    private final Duration timeout;
 
-    public LoadTestDbSyncMonitor(JdbcTemplate jdbcTemplate, StringRedisTemplate redisTemplate) {
+    public LoadTestDbSyncMonitor(
+            JdbcTemplate jdbcTemplate,
+            StringRedisTemplate redisTemplate,
+            @Value("${mocou.loadtest.db-sync.timeout-seconds:60}") long timeoutSeconds) {
         this.jdbcTemplate = jdbcTemplate;
         this.redisTemplate = redisTemplate;
+        this.timeout = Duration.ofSeconds(timeoutSeconds);
     }
 
     public void waitUntilComplete(long couponId, int expectedIssuedCount)
             throws InterruptedException {
-        Instant deadline = Instant.now().plus(TIMEOUT);
+        Instant deadline = Instant.now().plus(timeout);
         SyncState state = readState(couponId);
         while (!state.isComplete(expectedIssuedCount) && Instant.now().isBefore(deadline)) {
             Thread.sleep(POLL_INTERVAL.toMillis());
