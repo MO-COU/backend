@@ -77,7 +77,7 @@ class OrphanReferenceRule implements ConsistencyRule {
         List<Violation> violations = new ArrayList<>();
 
         for (Reference reference : REFERENCES) {
-            checkedCount += RuleQueries.count(jdbcTemplate, childCountSql(reference));
+            checkedCount += RuleQueries.countOnce(jdbcTemplate, context, childCountSql(reference));
             long orphanedValues = RuleQueries.count(jdbcTemplate, violationCountSql(reference));
             violationCount += orphanedValues;
 
