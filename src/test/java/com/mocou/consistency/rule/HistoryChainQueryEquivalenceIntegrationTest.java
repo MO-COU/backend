@@ -67,6 +67,21 @@ class HistoryChainQueryEquivalenceIntegrationTest extends MySqlContainerTest {
             LIMIT :limit
             """;
 
+    /** 바꾸기 전 MISSING_INITIAL 건수 쿼리(대조군). 조인 + GROUP BY + HAVING. */
+    private static final String LEGACY_MISSING_INITIAL_COUNT_SQL =
+            """
+            SELECT COUNT(*) FROM (
+                SELECT i.coupon_issue_id
+                FROM coupon_issue i
+                LEFT JOIN coupon_issue_history h
+                       ON h.coupon_issue_id = i.coupon_issue_id
+                      AND h.from_status = 'UNISSUED'
+                      AND h.to_status = 'ISSUED'
+                GROUP BY i.coupon_issue_id
+                HAVING COUNT(h.history_id) <> 1
+            ) missing_initial
+            """;
+
     @Autowired private NamedParameterJdbcTemplate namedJdbcTemplate;
 
     @Test
@@ -206,6 +221,89 @@ class HistoryChainQueryEquivalenceIntegrationTest extends MySqlContainerTest {
             assertSameResult().isEqualTo(1);
             assertThat(currentDetailIds()).containsExactly(102L);
         }
+    }
+
+    // ---------- MISSING_INITIAL_HISTORY 건수 대조 (#207) ----------
+    // 건수는 산수식, 상세는 조인식으로 식이 둘이 됐다. 같은 기준임을 원안 건수식과의 대조로 못 박는다.
+
+    @Test
+    @DisplayName("최초 이력 건수: 정상 데이터에서 산수식과 원안이 모두 0을 낸다")
+    void missingInitialAgreesOnCleanData() {
+        // given
+        seedMembersAndCoupon(2);
+        insertIssue(1, 1, "ISSUED", null);
+        insertHistory(101, 1, "UNISSUED", "ISSUED", ISSUED_AT);
+        insertIssue(2, 2, "USED", ISSUED_AT.plusHours(3));
+        insertHistory(201, 2, "UNISSUED", "ISSUED", ISSUED_AT);
+        insertHistory(202, 2, "ISSUED", "USED", ISSUED_AT.plusHours(3));
+
+        // when, then
+        assertSameMissingInitialCount(0);
+    }
+
+    @Test
+    @DisplayName("최초 이력 건수: 이력이 아예 없는 발급을 둘 다 1건으로 센다")
+    void missingInitialAgreesOnZeroHistory() {
+        // given - 2번 발급은 이력이 한 줄도 없다
+        seedMembersAndCoupon(2);
+        insertIssue(1, 1, "ISSUED", null);
+        insertHistory(101, 1, "UNISSUED", "ISSUED", ISSUED_AT);
+        insertIssue(2, 2, "ISSUED", null);
+
+        // when, then
+        assertSameMissingInitialCount(1);
+    }
+
+    @Test
+    @DisplayName("최초 이력 건수: 최초 전이가 두 건인 발급을 둘 다 1건으로 센다")
+    void missingInitialAgreesOnDuplicatedInitial() {
+        // given
+        seedMembersAndCoupon(1);
+        insertIssue(1, 1, "ISSUED", null);
+        insertHistory(101, 1, "UNISSUED", "ISSUED", ISSUED_AT);
+        insertHistory(102, 1, "UNISSUED", "ISSUED", ISSUED_AT.plusMinutes(1));
+
+        // when, then
+        assertSameMissingInitialCount(1);
+    }
+
+    /** 0건짜리와 2건짜리가 섞여 있어도 산수(전체 − 1건 이상 + 2건 이상)가 합계를 정확히 낸다. */
+    @Test
+    @DisplayName("최초 이력 건수: 0건과 2건이 섞여도 두 식의 합이 같다")
+    void missingInitialAgreesOnMixedViolations() {
+        // given - 1번 정상, 2번 이력 없음, 3번 최초 전이 중복
+        seedMembersAndCoupon(3);
+        insertIssue(1, 1, "ISSUED", null);
+        insertHistory(101, 1, "UNISSUED", "ISSUED", ISSUED_AT);
+        insertIssue(2, 2, "ISSUED", null);
+        insertIssue(3, 3, "ISSUED", null);
+        insertHistory(301, 3, "UNISSUED", "ISSUED", ISSUED_AT);
+        insertHistory(302, 3, "UNISSUED", "ISSUED", ISSUED_AT.plusMinutes(1));
+
+        // when, then
+        assertSameMissingInitialCount(2);
+    }
+
+    @Test
+    @DisplayName("최초 이력 건수: 같은 데이터를 여러 번 세도 결과가 같다")
+    void missingInitialStaysDeterministicAcrossRuns() {
+        // given
+        seedMembersAndCoupon(2);
+        insertIssue(1, 1, "ISSUED", null);
+        insertIssue(2, 2, "ISSUED", null);
+        insertHistory(201, 2, "UNISSUED", "ISSUED", ISSUED_AT);
+
+        // when, then
+        for (int run = 0; run < 3; run++) {
+            assertSameMissingInitialCount(1);
+        }
+    }
+
+    private void assertSameMissingInitialCount(long expected) {
+        long legacyCount = count(LEGACY_MISSING_INITIAL_COUNT_SQL);
+        long currentCount = count(HistoryChainRule.MISSING_INITIAL_HISTORY.violationCountSql());
+        assertThat(currentCount).as("산수식 건수").isEqualTo(legacyCount);
+        assertThat(currentCount).isEqualTo(expected);
     }
 
     /**

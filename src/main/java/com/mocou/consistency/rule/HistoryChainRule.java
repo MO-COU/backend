@@ -46,23 +46,32 @@ class HistoryChainRule implements ConsistencyRule {
     /**
      * 최초 발급 이력이 정확히 한 건인지 본다.
      *
-     * <p>{@code LEFT JOIN}이라 이력이 아예 없는 발급 건도 {@code COUNT}가 0으로 잡혀 검사 범위에 들어온다.
-     * {@code INNER JOIN}이면 그런 건이 조인에서 빠져 "이력이 없다"는 위반을 놓친다.
+     * <p><b>건수는 조인 없이 산수로 센다.</b> "최초 전이가 1건이 아닌 발급"은 (0건인 발급) + (2건 이상인 발급)으로
+     * 분해되고, 앞 항은 [전체 발급 수 − 최초 전이가 있는 발급 수]다. 이력의 발급 건은 FK({@code fk_history_issue})
+     * 덕에 반드시 존재하므로 이력 테이블 하나만 집계하면 세 값이 모두 나온다. 원래는 발급 300만 행을
+     * {@code LEFT JOIN}으로 이력과 맞췄는데, 실행 계획이 발급마다 이력을 랜덤 탐색하는 Nested loop이라 14초를
+     * 썼다(실측). 조인을 없애면 9초대다 — 조인을 hash join으로 바꿔도 10초에서 멈추는데, 이 쿼리의 바닥이
+     * 조인이 아니라 이력 600만 행 스캔 + 300만 그룹 집계이기 때문이다.
+     *
+     * <p>{@code COALESCE}는 이력이 한 건도 없는 극단에서 {@code SUM}이 {@code NULL}이 되는 것을 0으로 접는다.
+     *
+     * <p><b>상세는 원안({@code LEFT JOIN}) 그대로다.</b> 위반이 있을 때만 도는 드문 경로고, 발급별 목록에는
+     * 어차피 조인이 필요하다. {@code LEFT JOIN}이라 이력이 아예 없는 발급 건도 {@code COUNT}가 0으로 잡혀
+     * 검사 범위에 들어온다 — {@code INNER JOIN}이면 그런 건이 조인에서 빠져 "이력이 없다"는 위반을 놓친다.
+     * 건수와 상세의 식이 달라졌으므로, 둘이 같은 기준임은 동등성 테스트가 원안 건수식을 대조군 삼아 못 박는다.
      */
-    private static final ChainCheck MISSING_INITIAL_HISTORY =
+    static final ChainCheck MISSING_INITIAL_HISTORY =
             new ChainCheck(
                     ISSUE_COUNT_SQL,
                     """
-                    SELECT COUNT(*) FROM (
-                        SELECT i.coupon_issue_id
-                        FROM coupon_issue i
-                        LEFT JOIN coupon_issue_history h
-                               ON h.coupon_issue_id = i.coupon_issue_id
-                              AND h.from_status = 'UNISSUED'
-                              AND h.to_status = 'ISSUED'
-                        GROUP BY i.coupon_issue_id
-                        HAVING COUNT(h.history_id) <> 1
-                    ) missing_initial
+                    SELECT (SELECT COUNT(*) FROM coupon_issue) - COUNT(*) + COALESCE(SUM(c > 1), 0)
+                    FROM (
+                        SELECT COUNT(*) AS c
+                        FROM coupon_issue_history
+                        WHERE from_status = 'UNISSUED'
+                          AND to_status = 'ISSUED'
+                        GROUP BY coupon_issue_id
+                    ) g
                     """,
                     """
                     SELECT i.coupon_issue_id, COUNT(h.history_id) AS initial_count
@@ -235,7 +244,7 @@ class HistoryChainRule implements ConsistencyRule {
         List<Violation> violations = new ArrayList<>();
 
         for (ChainCheck check : CHECKS) {
-            checkedCount += RuleQueries.count(jdbcTemplate, check.checkedSql());
+            checkedCount += RuleQueries.countOnce(jdbcTemplate, context, check.checkedSql());
             long found = RuleQueries.count(jdbcTemplate, check.violationCountSql());
             violationCount += found;
 
