@@ -14,8 +14,6 @@
   → API 호출자가 현재 누적값 조회
 ```
 
-예약 보상은 `compensate-coupon.lua`에서 같은 Hash의 `COMPENSATED`를 증가시킨다.
-
 ## Redis 카운터와 Hash 필드
 
 | 필드 | 의미 | 요청·실패 합계 포함 |
@@ -27,13 +25,12 @@
 | `ISSUE_CLOSED` | 발급 종료 후 요청 | 실패 및 전체 요청에 포함 |
 | `STOCK_NOT_INITIALIZED` | Redis 재고 미초기화 | 실패 및 전체 요청에 포함 |
 | `METADATA_NOT_INITIALIZED` | 발급 기간 메타데이터 미초기화 | 실패 및 전체 요청에 포함 |
-| `COMPENSATED` | 예약 후속 처리 실패로 원복 | 별도 운영 지표이며 요청·실패 합계에서 제외 |
 
 누락된 Hash 필드는 0으로 해석한다. 음수·숫자가 아닌 값, 합산 오버플로, Redis 접근 실패는 API의 `SERVICE_UNAVAILABLE` 응답으로 변환한다.
 
 ### 언제 증가하는가
 
-이 API는 Redis Hash의 값을 계산하거나 추정하지 않는다. `reserve-and-append-event.lua`와 `compensate-coupon.lua`가 원자적으로 증가시킨 값을 그대로 읽어 온다. 해당 상황의 요청이 없으면 응답값은 `0`이다.
+이 API는 Redis Hash의 값을 계산하거나 추정하지 않는다. `reserve-and-append-event.lua`가 원자적으로 증가시킨 값을 그대로 읽어 온다. 해당 상황의 요청이 없으면 응답값은 `0`이다.
 
 | 카운터 | 증가 조건 | 기본 k6 시나리오 |
 |---|---|---|
@@ -44,11 +41,10 @@
 | 발급 종료 (`ISSUE_CLOSED`) | Redis 서버 시간이 `closeAtEpochSecond`와 같거나 지난 요청 | 기본 스크립트에서는 미발생 |
 | 재고 미초기화 (`STOCK_NOT_INITIALIZED`) | `coupon:{couponId}:stock` 키가 없는 상태의 요청 | 정상 초기화된 기본 스크립트에서는 미발생 |
 | 메타데이터 미초기화 (`METADATA_NOT_INITIALIZED`) | 재고는 있으나 발급 시작·종료 시각 Hash 필드가 없는 요청 | 정상 초기화된 기본 스크립트에서는 미발생 |
-| 보상 처리 (`COMPENSATED`) | DB 동기화가 재시도 한도를 넘어 포기되어 이미 예약된 Redis 상태를 원복 | 정상 동기화에서는 미발생 |
 
 `STOCK_NOT_INITIALIZED`와 `METADATA_NOT_INITIALIZED`는 사용자 입력 오류가 아니라 Redis 발급 준비 누락·키 유실을 감지하는 운영 상태다. 두 경우 발급 API는 안전하게 `COUPON_ISSUE_NOT_READY`(503)로 거절한다.
 
-`COMPENSATED`는 새 요청의 실패가 아니다. Redis 예약 성공 뒤 Stream 소비자가 DB 반영을 반복 시도하고, 최대 재시도 횟수를 넘으면 해당 회원을 `issued-members` Set에서 제거하고 재고를 1 복구한다. 이 원복이 실제로 적용된 횟수만 증가하므로 전체 요청과 실패 합계에서는 제외한다.
+`dlqFailed`(DLQ 최종 실패 건수)는 이 Hash와 무관한 별도 소스에서 온다. 아래 "DB 동기화 진행"을 참고한다.
 
 ## DB 동기화 진행
 
@@ -58,8 +54,10 @@ API는 Redis 발급 결과와 함께 Redis Stream 소비자의 DB 적재 진행�
 |---|---|---|
 | Redis 예약 성공 | `reserved` | Redis Lua가 예약을 수락한 누적 횟수 |
 | DB 적재 완료 | `dbPersisted` | 해당 `couponId`의 `coupon_issue` 행 수 |
-| 처리 중 또는 재시도 중 | `pendingOrRetrying` | `max(0, reserved - dbPersisted - compensated)` |
-| 보상 완료 | `compensated` | DB 적재 재시도 한도 초과 후 Redis 예약을 실제로 원복한 누적 횟수 |
+| DLQ 최종 실패 | `dlqFailed` | `coupon:{couponId}:issue-dlq-failed` Stream 길이(`XLEN`) — DLQ 복구까지 재시도 한도를 넘겨 더 이상 자동 재시도되지 않는 건수 |
+| 처리 중 또는 재시도 중 | `pendingOrRetrying` | `max(0, reserved - dbPersisted - dlqFailed)` |
+
+`dlqFailed`는 새 요청의 실패가 아니다. Redis 예약 성공 뒤 Stream 소비자가 DB 반영을 반복 시도하고(메인 재시도 → DLQ 복구 재시도), DLQ 복구마저 재시도 한도를 넘기면 해당 엔트리가 `issue-dlq-failed` Stream으로 옮겨지며 이 값이 늘어난다. 이 시점부터는 자동 재시도가 멈추고 관리자가 `GET /{couponId}/issue-dlq/failed`로 확인해 `POST /{couponId}/issue-dlq/failed/{recordId}/retry`로 수동 재시도하거나 직접 판단해야 한다 — Redis 예약 자체를 자동으로 원복하지는 않는다(예전엔 `compensate-coupon.lua`가 자동으로 원복했으나 그 로직은 제거됐다).
 
 Redis와 DB는 하나의 원자적 스냅샷으로 조회되지 않는다. API 호출 시점에 따라 DB 적재 완료와 Redis 카운터 사이에 짧은 차이가 생길 수 있으며, 그 결과 계산값이 음수가 되는 경우 응답값은 0으로 보정한다.
 
@@ -77,7 +75,7 @@ Redis와 DB는 하나의 원자적 스냅샷으로 조회되지 않는다. API �
 GET /api/admin/coupons/4/issue-result-counts
 ```
 
-성공하면 현재 Redis 누적값을 공통 응답 봉투로 반환한다. `totalRequests`는 `reserved + failed`이며, `failed`는 `SOLD_OUT`, `DUPLICATE_ISSUE`, `NOT_OPEN_YET`, `ISSUE_CLOSED`, `STOCK_NOT_INITIALIZED`, `METADATA_NOT_INITIALIZED`의 합이다. `compensated`는 별도 지표다.
+성공하면 현재 Redis 누적값을 공통 응답 봉투로 반환한다. `totalRequests`는 `reserved + failed`이며, `failed`는 `SOLD_OUT`, `DUPLICATE_ISSUE`, `NOT_OPEN_YET`, `ISSUE_CLOSED`, `STOCK_NOT_INITIALIZED`, `METADATA_NOT_INITIALIZED`의 합이다. `dlqFailed`는 별도 지표다.
 
 ```json
 {
@@ -93,7 +91,7 @@ GET /api/admin/coupons/4/issue-result-counts
     "issueClosed": 0,
     "stockNotInitialized": 0,
     "metadataNotInitialized": 0,
-    "compensated": 3,
+    "dlqFailed": 3,
     "dbPersisted": 9980,
     "pendingOrRetrying": 17
   },

@@ -11,7 +11,7 @@ public record AdminCouponIssueResultCounts(
         long issueClosed,
         long stockNotInitialized,
         long metadataNotInitialized,
-        long compensated,
+        long dlqFailed,
         long dbPersisted,
         long pendingOrRetrying) {
 
@@ -24,7 +24,7 @@ public record AdminCouponIssueResultCounts(
             long issueClosed,
             long stockNotInitialized,
             long metadataNotInitialized,
-            long compensated) {
+            long dlqFailed) {
         long failed =
                 Math.addExact(
                         Math.addExact(
@@ -44,15 +44,20 @@ public record AdminCouponIssueResultCounts(
                 issueClosed,
                 stockNotInitialized,
                 metadataNotInitialized,
-                compensated,
+                dlqFailed,
                 0,
                 0);
     }
 
+    /**
+     * dlqFailed는 DLQ 복구마저 소진해 최종 실패로 확정된(= 더 이상 DB에 반영될 일이 없는) 건수다.
+     * notPersisted에서 이만큼을 빼야 "아직 재시도 중"인 진짜 pending만 남는다 — 안 빼면 관리자가
+     * 이미 관리자 개입이 필요하다고 알림까지 간 건을 "곧 끝날 것"으로 오판할 수 있다.
+     */
     public AdminCouponIssueResultCounts withPersistenceProgress(long dbPersisted) {
         long notPersisted = reserved > dbPersisted ? reserved - dbPersisted : 0;
         long pendingOrRetrying =
-                notPersisted > compensated ? notPersisted - compensated : 0;
+                notPersisted > dlqFailed ? notPersisted - dlqFailed : 0;
 
         return new AdminCouponIssueResultCounts(
                 couponId,
@@ -65,7 +70,7 @@ public record AdminCouponIssueResultCounts(
                 issueClosed,
                 stockNotInitialized,
                 metadataNotInitialized,
-                compensated,
+                dlqFailed,
                 dbPersisted,
                 pendingOrRetrying);
     }

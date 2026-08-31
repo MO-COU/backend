@@ -37,14 +37,18 @@ mocou:
       # 기본값 false. local 프로필엔 절대 넣지 않음.
       # 꺼진 채로 배포하면 발급이 Redis에만 쌓이고 DB로 절대 안 넘어간다.
       enabled: true
-      # 아래 4개는 부하테스트 시나리오마다 코드 배포 없이 EC2 .env만 바꿔 튜닝할 수 있게 env로 뺀다.
+      # 아래 5개는 부하테스트 시나리오마다 코드 배포 없이 EC2 .env만 바꿔 튜닝할 수 있게 env로 뺀다.
       # 기본값은 CouponIssueSyncProperties의 코드 기본값과 동일.
       chunk-size: ${MOCOU_ISSUE_SYNC_CHUNK_SIZE:500}
       batch-window-ms: ${MOCOU_ISSUE_SYNC_BATCH_WINDOW_MS:3000}
       # 컨슈머가 살아있는데 느린 것과 죽은 것을 구분하는 값 - 실제 처리 지연이 이 값에
       # 근접하면 죽지 않은 컨슈머를 죽었다고 오판해 중복 재처리할 수 있으니 내릴 때 주의.
       pending-min-idle-ms: ${MOCOU_ISSUE_SYNC_PENDING_MIN_IDLE_MS:10000}
-      dlq-pending-min-idle-ms: ${MOCOU_ISSUE_SYNC_DLQ_PENDING_MIN_IDLE_MS:20000}
+      # DLQ 복구가 포기하기까지의 재시도 한도 × dlq-pending-min-idle-ms가 DB 장애를
+      # 버티는 최대 시간이다. 테스트 때는 짧게(5회 x 20s = 100초) 써서 빨리 결판냈지만
+      # 운영에서는 DB 재시작/짧은 페일오버를 버틸 수 있게 늘린다(10회 x 60s = 10분).
+      dlq-max-delivery-count: ${MOCOU_ISSUE_SYNC_DLQ_MAX_DELIVERY_COUNT:10}
+      dlq-pending-min-idle-ms: ${MOCOU_ISSUE_SYNC_DLQ_PENDING_MIN_IDLE_MS:60000}
   notification:
     dispatch:
       # 기본값 false. local 프로필엔 절대 넣지 않음.
