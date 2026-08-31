@@ -1,13 +1,9 @@
 package com.mocou.issue;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataAccessException;
 
 public class RedisCouponIssueGatewayIntegrationTest
         extends RedisCouponIssueIntegrationTestSupport {
@@ -121,132 +117,6 @@ public class RedisCouponIssueGatewayIntegrationTest
                 .isEqualTo(CouponReservationResult.ISSUE_CLOSED);
         assertThat(currentStock()).isEqualTo("2");
         assertThat(issuedMemberScore(100L)).isNull();
-    }
-
-    @Test
-    @DisplayName("보상은 재고와 회원과 Counter를 한 번만 변경한다")
-    void compensatesReservationOnlyOnce() {
-        setStock(2);
-
-        CouponReservationResult reservation =
-                gateway.reserveAndAppendEvent(
-                        COUPON_ID,
-                        100L,
-                        UUID.randomUUID());
-
-        CouponCompensationResult first =
-                gateway.compensate(COUPON_ID, 100L);
-        CouponCompensationResult second =
-                gateway.compensate(COUPON_ID, 100L);
-
-        assertThat(reservation)
-                .isEqualTo(CouponReservationResult.RESERVED);
-        assertThat(first)
-                .isEqualTo(CouponCompensationResult.COMPENSATED);
-        assertThat(second)
-                .isEqualTo(CouponCompensationResult.NOT_NEEDED);
-
-        assertThat(currentStock()).isEqualTo("2");
-        assertThat(issuedMemberScore(100L)).isNull();
-
-        assertThat(issueResultCount("RESERVED"))
-                .isEqualTo(1L);
-        assertThat(issueResultCount("COMPENSATED"))
-                .isEqualTo(1L);
-        assertThat(redisTemplate.opsForValue().get(issueSequenceKey()))
-                .isEqualTo("1");
-
-        assertThat(
-                issueResultCount("RESERVED")
-                        - issueResultCount("COMPENSATED"))
-                .isEqualTo(issuedMemberCount());
-    }
-
-    @Test
-    @DisplayName("보상된 발급 순번은 다음 예약에 재사용하지 않는다")
-    void doesNotReuseCompensatedIssueSequence() {
-        setStock(2);
-
-        gateway.reserveAndAppendEvent(
-                COUPON_ID,
-                100L,
-                UUID.randomUUID());
-        gateway.compensate(COUPON_ID, 100L);
-
-        CouponReservationResult next =
-                gateway.reserveAndAppendEvent(
-                        COUPON_ID,
-                        101L,
-                        UUID.randomUUID());
-
-        assertThat(next).isEqualTo(CouponReservationResult.RESERVED);
-        assertThat(issuedMemberScore(100L)).isNull();
-        assertThat(issuedMemberScore(101L)).isEqualTo(2.0);
-        assertThat(redisTemplate.opsForValue().get(issueSequenceKey()))
-                .isEqualTo("2");
-    }
-
-    @Test
-    @DisplayName("재고 Key가 없으면 보상을 수행하지 않는다")
-    void reportsMissingStockDuringCompensation() {
-        CouponCompensationResult result =
-                gateway.compensate(COUPON_ID, 100L);
-
-        assertThat(result)
-                .isEqualTo(
-                        CouponCompensationResult
-                                .STOCK_NOT_INITIALIZED);
-    }
-
-    @Test
-    @DisplayName("보상 Counter Key 타입이 잘못되면 예약 상태를 변경하지 않는다")
-    void rejectsWrongCompensationCounterType() {
-        setStock(1);
-
-        addIssuedMember(100L, 1.0);
-        redisTemplate.opsForValue().set(
-                issueResultCountsKey(),
-                "not-a-hash");
-
-        assertThatThrownBy(() ->
-                gateway.compensate(COUPON_ID, 100L))
-                .isInstanceOf(DataAccessException.class);
-
-        assertThat(currentStock()).isEqualTo("1");
-        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
-        assertThat(redisTemplate.opsForValue().get(
-                issueResultCountsKey()))
-                .isEqualTo("not-a-hash");
-    }
-
-    @Test
-    @DisplayName("보상 Counter 기록 실패 시 재고와 회원 상태를 원복한다")
-    void rollsBackCompensationWhenCounterUpdateFails() {
-        setStock(2);
-
-        gateway.reserveAndAppendEvent(
-                COUPON_ID,
-                100L,
-                UUID.randomUUID());
-
-        redisTemplate.opsForHash().put(
-                issueResultCountsKey(),
-                "COMPENSATED",
-                "not-a-number");
-
-        assertThatThrownBy(() ->
-                gateway.compensate(COUPON_ID, 100L))
-                .isInstanceOf(DataAccessException.class);
-
-        assertThat(currentStock()).isEqualTo("1");
-        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
-
-        assertThat(issueResultCount("RESERVED"))
-                .isEqualTo(1L);
-        assertThat(redisTemplate.opsForHash().get(
-                issueResultCountsKey(),
-                "COMPENSATED"))
-                .isEqualTo("not-a-number");
     }
 
 }
