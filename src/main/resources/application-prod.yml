@@ -10,6 +10,13 @@ server:
       max: ${SERVER_TOMCAT_THREADS_MAX:400}
 
 spring:
+  task:
+    scheduling:
+      pool:
+        # 미설정 시 기본값 1 - CouponIssueSyncConsumer(10ms), CouponIssueDlqRecoveryConsumer(20s),
+        # NotificationDispatchConsumer(10s), CouponExpirationScheduler(60s) 4개 @Scheduled가
+        # 스레드 1개를 공유·경합하게 되어 4로 올린다.
+        size: 4
   jpa:
     hibernate:
       # local과 동일하게 validate로 둔다. 엔티티와 실제 스키마가 어긋나면 조용히 넘어가지 않고 실패 확인
@@ -28,12 +35,24 @@ mocou:
       # 기본값 false. local 프로필엔 절대 넣지 않음.
       # 꺼진 채로 배포하면 발급이 Redis에만 쌓이고 DB로 절대 안 넘어간다.
       enabled: true
+      # 아래 4개는 부하테스트 시나리오마다 코드 배포 없이 EC2 .env만 바꿔 튜닝할 수 있게 env로 뺀다.
+      # 기본값은 CouponIssueSyncProperties의 코드 기본값과 동일.
+      chunk-size: ${MOCOU_ISSUE_SYNC_CHUNK_SIZE:500}
+      batch-window-ms: ${MOCOU_ISSUE_SYNC_BATCH_WINDOW_MS:3000}
+      # 컨슈머가 살아있는데 느린 것과 죽은 것을 구분하는 값 - 실제 처리 지연이 이 값에
+      # 근접하면 죽지 않은 컨슈머를 죽었다고 오판해 중복 재처리할 수 있으니 내릴 때 주의.
+      pending-min-idle-ms: ${MOCOU_ISSUE_SYNC_PENDING_MIN_IDLE_MS:10000}
+      dlq-pending-min-idle-ms: ${MOCOU_ISSUE_SYNC_DLQ_PENDING_MIN_IDLE_MS:20000}
   notification:
     dispatch:
       # 기본값 false. local 프로필엔 절대 넣지 않음.
       # 꺼진 채로 배포하면 알림이 notification 테이블에 PENDING으로만 쌓이고 발송되지 않는다.
       # created_at 나이 필터로 즉시 발송 경로와의 이중 발송 경쟁 상태를 막아둔 뒤에만 켠다.
       enabled: true
+      batch-size: ${MOCOU_NOTIFICATION_DISPATCH_BATCH_SIZE:500}
+      # 즉시 경로가 아직 처리 중인 row를 폴링이 집어가면 이중 발송이 나므로, 실제 발송
+      # 연동으로 즉시 경로 처리 시간이 늘기 전까지는 이 값을 내리지 않는다.
+      min-dispatch-age-seconds: ${MOCOU_NOTIFICATION_DISPATCH_MIN_DISPATCH_AGE_SECONDS:3}
   loadtest:
     db-sync:
       # 2만 건 기준 60초로 충분했지만 V3(5만 VU)는 DB 반영량이 커서 더 걸릴 수 있다.

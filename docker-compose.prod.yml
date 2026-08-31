@@ -31,7 +31,8 @@ services:
     image: redis:8.8-alpine
     container_name: mocou-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    # everysec/always 실측 비교(20000VU) 결과 처리량 차이 없어 내구성 더 높은 always로 고정 - #216
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
     volumes:
       - redis-data:/data
     healthcheck:
@@ -76,6 +77,14 @@ services:
 
       # 부하테스트 후 Redis→DB 적재 완료 대기 시간(초). 발급량이 클수록 더 걸릴 수 있다.
       MOCOU_LOADTEST_DB_SYNC_TIMEOUT_SECONDS: ${MOCOU_LOADTEST_DB_SYNC_TIMEOUT_SECONDS:-60}
+
+      # issue sync / notification dispatch 튜닝값. 기본값은 application-prod.yml과 동일.
+      MOCOU_ISSUE_SYNC_CHUNK_SIZE: ${MOCOU_ISSUE_SYNC_CHUNK_SIZE:-500}
+      MOCOU_ISSUE_SYNC_BATCH_WINDOW_MS: ${MOCOU_ISSUE_SYNC_BATCH_WINDOW_MS:-3000}
+      MOCOU_ISSUE_SYNC_PENDING_MIN_IDLE_MS: ${MOCOU_ISSUE_SYNC_PENDING_MIN_IDLE_MS:-10000}
+      MOCOU_ISSUE_SYNC_DLQ_PENDING_MIN_IDLE_MS: ${MOCOU_ISSUE_SYNC_DLQ_PENDING_MIN_IDLE_MS:-20000}
+      MOCOU_NOTIFICATION_DISPATCH_BATCH_SIZE: ${MOCOU_NOTIFICATION_DISPATCH_BATCH_SIZE:-500}
+      MOCOU_NOTIFICATION_DISPATCH_MIN_DISPATCH_AGE_SECONDS: ${MOCOU_NOTIFICATION_DISPATCH_MIN_DISPATCH_AGE_SECONDS:-3}
     volumes:
       # Logback 기본 경로(/app/logs)를 named volume에 보관해 앱 컨테이너 교체 뒤에도 오류 로그를 유지한다.
       - app-logs:/app/logs
