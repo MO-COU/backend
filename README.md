@@ -49,7 +49,8 @@ MOCOU는 **Redis를 발급 처리의 진입점으로 사용하고 Redis Stream�
 ## 🏗 System Architecture
 
 <!-- 시스템 아키텍처 이미지는 이 위치에 추가하세요. -->
-<!-- 예: <img src="./docs/images/system-architecture.png" width="100%" alt="MOCOU 시스템 아키텍처"> -->
+<!-- 예: <img src="https://github.com/user-attachments/assets/2992ba1d-bad5-4e39-ab93-ede97f1bddca" width="100%" alt="MOCOU 시스템 아키텍처"> -->
+ <img src="https://github.com/user-attachments/assets/2992ba1d-bad5-4e39-ab93-ede97f1bddca" width="100%" alt="MOCOU 시스템 아키텍처">
 
 시스템의 전체 구성과 발급 처리·장애 복구·운영 아키텍처는 [아키텍처 문서](./docs/architecture.md)에서 확인할 수 있습니다.
 
@@ -120,7 +121,7 @@ docker compose up -d
 
 ## 📚 Documents
 
-* [아키텍처](./docs/architecture.md) - 시스템 구성, 발급 흐름, 장애 복구 및 운영 구조
+* [아키텍처](./docs/architecture.md)
 * [정합성 검증 규칙 명세](./docs/b1/consistency-rules.md)
 * [쿠폰 생명주기 정책](./docs/b2/coupon-lifecycle-policy.md)
 * [쿠폰 만료 배치 가이드](./docs/b2/coupon-expiration-batch-guide.md)
