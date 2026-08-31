@@ -31,7 +31,8 @@ services:
     image: redis:8.8-alpine
     container_name: mocou-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    # everysec/always 실측 비교(20000VU) 결과 처리량 차이 없어 내구성 더 높은 always로 고정 - #216
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
     volumes:
       - redis-data:/data
     healthcheck:
@@ -67,15 +68,36 @@ services:
 
       # Tomcat 동시 연결 한도. 부하테스트 시나리오마다 필요한 값이 달라 코드 배포 없이
       # 이 .env만 바꾸고 재기동(up -d)하면 반영된다. 기본값은 application-prod.yml과 동일.
+      #
+      # accept-count는 아래 sysctls의 somaxconn과 같은 값(32768)으로 맞춘다. 커널 값이 더
+      # 작으면 accept-count가 그 선에서 잘리므로, 한쪽만 올리면 조용히 무효가 된다.
+      # threads.max 200은 실측 근거다 - 2만 스파이크에서 200과 400의 p95가 같았고
+      # (콜드 6328 vs 6194, 웜 3531 vs 3510ms) 요청 하나가 Redis Lua 수 ms라
+      # 스레드가 즉시 반납되기 때문이다. p95를 가르는 것은 스레드가 아니라 JVM 워밍업이었다.
       SERVER_TOMCAT_MAX_CONNECTIONS: ${SERVER_TOMCAT_MAX_CONNECTIONS:-30000}
-      SERVER_TOMCAT_ACCEPT_COUNT: ${SERVER_TOMCAT_ACCEPT_COUNT:-2000}
-      SERVER_TOMCAT_THREADS_MAX: ${SERVER_TOMCAT_THREADS_MAX:-400}
+      SERVER_TOMCAT_ACCEPT_COUNT: ${SERVER_TOMCAT_ACCEPT_COUNT:-32768}
+      SERVER_TOMCAT_THREADS_MAX: ${SERVER_TOMCAT_THREADS_MAX:-200}
 
       # MySQL 커넥션 풀 크기. MySQL 자체 max_connections(기본 151)를 넘지 않게 잡는다.
       SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:-16}
 
       # 부하테스트 후 Redis→DB 적재 완료 대기 시간(초). 발급량이 클수록 더 걸릴 수 있다.
       MOCOU_LOADTEST_DB_SYNC_TIMEOUT_SECONDS: ${MOCOU_LOADTEST_DB_SYNC_TIMEOUT_SECONDS:-60}
+
+      # issue sync / notification dispatch 튜닝값. 기본값은 application-prod.yml과 동일.
+      MOCOU_ISSUE_SYNC_CHUNK_SIZE: ${MOCOU_ISSUE_SYNC_CHUNK_SIZE:-500}
+      MOCOU_ISSUE_SYNC_BATCH_WINDOW_MS: ${MOCOU_ISSUE_SYNC_BATCH_WINDOW_MS:-3000}
+      MOCOU_ISSUE_SYNC_PENDING_MIN_IDLE_MS: ${MOCOU_ISSUE_SYNC_PENDING_MIN_IDLE_MS:-10000}
+      MOCOU_ISSUE_SYNC_DLQ_PENDING_MIN_IDLE_MS: ${MOCOU_ISSUE_SYNC_DLQ_PENDING_MIN_IDLE_MS:-20000}
+      MOCOU_NOTIFICATION_DISPATCH_BATCH_SIZE: ${MOCOU_NOTIFICATION_DISPATCH_BATCH_SIZE:-500}
+      MOCOU_NOTIFICATION_DISPATCH_MIN_DISPATCH_AGE_SECONDS: ${MOCOU_NOTIFICATION_DISPATCH_MIN_DISPATCH_AGE_SECONDS:-3}
+    # 컨테이너는 호스트 커널 값을 그대로 쓰지 않고 자기 네트워크 네임스페이스 값을 본다.
+    # 여기서 올려주지 않으면 도커 기본값(somaxconn 4096)이 적용되어 accept-count가
+    # 커널 단에서 잘린다. 2만 스파이크에서 연결 거절이 나는 지점이라 반드시 필요하다.
+    # accept-count와 같은 값으로 맞춘다 - 한쪽만 올리면 다른 쪽이 상한이 되어 무효가 된다.
+    sysctls:
+      net.core.somaxconn: 32768
+      net.ipv4.tcp_max_syn_backlog: 32768
     volumes:
       # Logback 기본 경로(/app/logs)를 named volume에 보관해 앱 컨테이너 교체 뒤에도 오류 로그를 유지한다.
       - app-logs:/app/logs

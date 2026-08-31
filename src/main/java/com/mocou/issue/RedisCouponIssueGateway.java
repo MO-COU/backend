@@ -27,9 +27,6 @@ public class RedisCouponIssueGateway {
     private static final long ISSUE_CLOSED = -4L;
     private static final long METADATA_NOT_INITIALIZED = -5L;
 
-    private static final long COMPENSATION_APPLIED = 1L;
-    private static final long COMPENSATION_NOT_NEEDED = 0L;
-
     private static final RedisScript<Long> RESERVE_SCRIPT =
             RedisScript.of(
                     new ClassPathResource(
@@ -40,12 +37,6 @@ public class RedisCouponIssueGateway {
             RedisScript.of(
                     new ClassPathResource(
                             "scripts/redis/reserve-and-append-event.lua"),
-                    Long.class);
-
-    private static final RedisScript<Long> COMPENSATE_SCRIPT =
-            RedisScript.of(
-                    new ClassPathResource(
-                            "scripts/redis/compensate-coupon.lua"),
                     Long.class);
 
     private final StringRedisTemplate redisTemplate;
@@ -94,24 +85,6 @@ public class RedisCouponIssueGateway {
         return toReservationResult(result);
     }
 
-    public CouponCompensationResult compensate(
-            long couponId,
-            long memberId
-    ) {
-        validateMemberId(memberId);
-
-        Long result = redisTemplate.execute(
-                COMPENSATE_SCRIPT,
-                createCompensationKeys(couponId),
-                Long.toString(memberId));
-
-        if (result == null) {
-            throw new IllegalStateException("Redis compensation script returned null.");
-        }
-
-        return toCompensationResult(result);
-    }
-
     private List<String> createReservationKeys(long couponId) {
         return List.of(
                 CouponRedisKey.stock(couponId),
@@ -128,13 +101,6 @@ public class RedisCouponIssueGateway {
                 CouponRedisKey.issueStream(couponId),
                 CouponRedisKey.issueResultCounts(couponId),
                 CouponRedisKey.issueSequence(couponId));
-    }
-
-    private List<String> createCompensationKeys(long couponId) {
-        return List.of(
-                CouponRedisKey.stock(couponId),
-                CouponRedisKey.issuedMembers(couponId),
-                CouponRedisKey.issueResultCounts(couponId));
     }
 
     private CouponReservationResult toReservationResult(long result) {
@@ -167,22 +133,6 @@ public class RedisCouponIssueGateway {
         }
 
         throw new IllegalStateException("Unexpected Redis reservation result: " + result);
-    }
-
-    private CouponCompensationResult toCompensationResult(long result) {
-        if (result == COMPENSATION_APPLIED) {
-            return CouponCompensationResult.COMPENSATED;
-        }
-
-        if (result == COMPENSATION_NOT_NEEDED) {
-            return CouponCompensationResult.NOT_NEEDED;
-        }
-
-        if (result == STOCK_NOT_INITIALIZED) {
-            return CouponCompensationResult.STOCK_NOT_INITIALIZED;
-        }
-
-        throw new IllegalStateException("Unexpected Redis compensation result: " + result);
     }
 
     private void validateMemberId(long memberId) {
