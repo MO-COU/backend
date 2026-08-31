@@ -134,7 +134,7 @@ class AdminCouponControllerTest {
                 .andExpect(jsonPath("$.data.issueClosed").value(30))
                 .andExpect(jsonPath("$.data.dbPersisted").value(7_980))
                 .andExpect(jsonPath("$.data.pendingOrRetrying").value(320))
-                .andExpect(jsonPath("$.data.compensated").value(20));
+                .andExpect(jsonPath("$.data.dlqFailed").value(20));
     }
 
     @Test

@@ -41,11 +41,11 @@ public class CouponIssueSyncProperties {
     // DLQ 복구는 메인 스트림보다 여유 있게 재시도한다 — DB가 회복될 시간을 벌어주는
     // 게 목적이라 pendingMinIdleMs보다 길게 잡는다.
     @Min(1)
-    private long dlqPendingMinIdleMs = 20_000;
+    private long dlqPendingMinIdleMs = 60_000;
 
     // DLQ에서마저 이 값을 넘겨 배달되면 그때 비로소 최종 포기(보상+실패 로그)한다.
     @Min(1)
-    private int dlqMaxDeliveryCount = 5;
+    private int dlqMaxDeliveryCount = 10;
 
     public int getChunkSize() {
         return chunkSize;
