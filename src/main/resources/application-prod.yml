@@ -5,9 +5,11 @@ server:
     # 병목 -> 한도 올리기  /// V3(5만 VU)는 이 값을 넘으므로 별도로 올려야 함.
     # 시나리오마다 필요한 값이 달라 코드 배포 없이 EC2 .env만 바꿔 튜닝할 수 있게 env로 뺀다.
     max-connections: ${SERVER_TOMCAT_MAX_CONNECTIONS:30000}
-    accept-count: ${SERVER_TOMCAT_ACCEPT_COUNT:2000}
+    accept-count: ${SERVER_TOMCAT_ACCEPT_COUNT:32768}
     threads:
-      max: ${SERVER_TOMCAT_THREADS_MAX:400}
+      # 2만 스파이크에서 200과 400의 p95가 같았다(콜드 6328 vs 6194, 웜 3531 vs 3510ms).
+      # 요청 하나가 Redis Lua 수 ms라 스레드가 즉시 반납되어 200으로 충분하다.
+      max: ${SERVER_TOMCAT_THREADS_MAX:200}
 
 spring:
   task:
