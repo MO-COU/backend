@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 
 public class RedisCouponIssueGatewayIntegrationTest
         extends RedisCouponIssueIntegrationTestSupport {
@@ -184,6 +185,93 @@ public class RedisCouponIssueGatewayIntegrationTest
         assertThat(issuedMemberScore(101L)).isEqualTo(2.0);
         assertThat(redisTemplate.opsForValue().get(issueSequenceKey()))
                 .isEqualTo("2");
+    }
+
+    @Test
+    @DisplayName("Replica ACK가 없으면 복제 미확인 Counter를 기록하고 예약은 유지한다")
+    void recordsUnconfirmedReplicationWithoutRollingBackReservation() {
+        setStock(1);
+
+        CouponIssueReplicationProperties properties =
+                new CouponIssueReplicationProperties();
+        properties.setWaitEnabled(true);
+        properties.setRequiredReplicas(1);
+        properties.setTimeoutMs(1);
+
+        RedisCouponIssueGateway gatewayWithWait =
+                new RedisCouponIssueGateway(
+                        redisTemplate,
+                        properties,
+                        (operations, requiredReplicas, timeoutMs) -> 0L);
+
+        CouponReservationResult result = gatewayWithWait.reserveAndAppendEvent(
+                COUPON_ID,
+                100L,
+                UUID.randomUUID());
+
+        assertThat(result).isEqualTo(CouponReservationResult.RESERVED);
+        assertThat(currentStock()).isEqualTo("0");
+        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
+        assertThat(issueResultCount("RESERVED")).isEqualTo(1L);
+        assertThat(issueResultCount("REPLICATION_UNCONFIRMED")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("Replica ACK가 확인되면 복제 미확인 Counter를 기록하지 않는다")
+    void doesNotRecordUnconfirmedReplicationWhenAcknowledged() {
+        setStock(1);
+
+        CouponIssueReplicationProperties properties =
+                new CouponIssueReplicationProperties();
+        properties.setWaitEnabled(true);
+
+        RedisCouponIssueGateway gatewayWithWait =
+                new RedisCouponIssueGateway(
+                        redisTemplate,
+                        properties,
+                        (operations, requiredReplicas, timeoutMs) -> 1L);
+
+        CouponReservationResult result = gatewayWithWait.reserveAndAppendEvent(
+                COUPON_ID,
+                100L,
+                UUID.randomUUID());
+
+        assertThat(result).isEqualTo(CouponReservationResult.RESERVED);
+        assertThat(currentStock()).isEqualTo("0");
+        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
+        assertThat(issueResultCount("RESERVED")).isEqualTo(1L);
+        assertThat(issueResultCount("REPLICATION_UNCONFIRMED")).isZero();
+    }
+
+    @Test
+    @DisplayName("Replica ACK 확인 중 연결 예외가 발생하면 예약은 유지하고 예외를 전달한다")
+    void keepsReservationAndPropagatesWaitConnectionFailure() {
+        setStock(1);
+
+        CouponIssueReplicationProperties properties =
+                new CouponIssueReplicationProperties();
+        properties.setWaitEnabled(true);
+
+        RedisCouponIssueGateway gatewayWithWait =
+                new RedisCouponIssueGateway(
+                        redisTemplate,
+                        properties,
+                        (operations, requiredReplicas, timeoutMs) -> {
+                            throw new RedisConnectionFailureException(
+                                    "Replica ACK 확인 실패");
+                        });
+
+        assertThatThrownBy(() ->
+                gatewayWithWait.reserveAndAppendEvent(
+                        COUPON_ID,
+                        100L,
+                        UUID.randomUUID()))
+                .isInstanceOf(RedisConnectionFailureException.class);
+
+        assertThat(currentStock()).isEqualTo("0");
+        assertThat(issuedMemberScore(100L)).isEqualTo(1.0);
+        assertThat(issueResultCount("RESERVED")).isEqualTo(1L);
+        assertThat(issueResultCount("REPLICATION_UNCONFIRMED")).isZero();
     }
 
     @Test

@@ -1,0 +1,27 @@
+services:
+  redis-replica:
+    image: redis:8.8-alpine
+    container_name: mocou-redis-replica
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --replicaof
+      - redis
+      - "6379"
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - redis-replica-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  redis-replica-data:

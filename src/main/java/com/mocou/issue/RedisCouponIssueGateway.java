@@ -4,11 +4,14 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.core.RedisOperations;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /*
  * 1. Lua Script 를 Classpath에서 로딩
@@ -17,6 +20,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class RedisCouponIssueGateway {
 
     private static final long RESERVATION_APPLIED = 1L;
@@ -29,6 +33,9 @@ public class RedisCouponIssueGateway {
 
     private static final long COMPENSATION_APPLIED = 1L;
     private static final long COMPENSATION_NOT_NEEDED = 0L;
+
+    private static final String REPLICATION_UNCONFIRMED =
+            "REPLICATION_UNCONFIRMED";
 
     private static final RedisScript<Long> RESERVE_SCRIPT =
             RedisScript.of(
@@ -49,6 +56,8 @@ public class RedisCouponIssueGateway {
                     Long.class);
 
     private final StringRedisTemplate redisTemplate;
+    private final CouponIssueReplicationProperties replicationProperties;
+    private final CouponIssueReplicationWaiter replicationWaiter;
 
     public CouponReservationResult reserve(
             long couponId,
@@ -80,18 +89,83 @@ public class RedisCouponIssueGateway {
                     "eventId는 필수입니다.");
         }
 
-        Long result = redisTemplate.execute(
-                RESERVE_AND_APPEND_EVENT_SCRIPT,
-                createReservationAndStreamKeys(couponId),
-                Long.toString(memberId),
-                eventId.toString(),
-                Long.toString(couponId));
+        Long result = redisTemplate.execute(new SessionCallback<>() {
+            @Override
+            @SuppressWarnings("unchecked")
+            public <K, V> Long execute(RedisOperations<K, V> operations) {
+                RedisOperations<String, String> stringOperations =
+                        (RedisOperations<String, String>) operations;
+                return reserveAndWait(
+                        stringOperations,
+                        couponId,
+                        memberId,
+                        eventId);
+            }
+        });
 
         if (result == null) {
             throw new IllegalStateException("Redis reservation and stream script returned null.");
         }
 
         return toReservationResult(result);
+    }
+
+    private Long reserveAndWait(
+            RedisOperations<String, String> operations,
+            long couponId,
+            long memberId,
+            UUID eventId
+    ) {
+        Long scriptResult = operations.execute(
+                RESERVE_AND_APPEND_EVENT_SCRIPT,
+                createReservationAndStreamKeys(couponId),
+                Long.toString(memberId),
+                eventId.toString(),
+                Long.toString(couponId));
+
+        if (scriptResult != null
+                && scriptResult == RESERVATION_APPLIED
+                && replicationProperties.isWaitEnabled()) {
+            long acknowledgedReplicas =
+                    replicationWaiter.waitForReplication(
+                            operations,
+                            replicationProperties.getRequiredReplicas(),
+                            replicationProperties.getTimeoutMs());
+            if (acknowledgedReplicas
+                    < replicationProperties.getRequiredReplicas()) {
+                recordUnconfirmedReplication(
+                        operations,
+                        couponId,
+                        acknowledgedReplicas);
+            }
+        }
+
+        return scriptResult;
+    }
+
+    private void recordUnconfirmedReplication(
+            RedisOperations<String, String> operations,
+            long couponId,
+            long acknowledgedReplicas
+    ) {
+        log.warn(
+                "Redis 예약 복제 확인 부족 (쿠폰 {}, 필요 Replica {}, 확인 Replica {}, 제한 {}ms)",
+                couponId,
+                replicationProperties.getRequiredReplicas(),
+                acknowledgedReplicas,
+                replicationProperties.getTimeoutMs());
+
+        try {
+            operations.opsForHash().increment(
+                    CouponRedisKey.issueResultCounts(couponId),
+                    REPLICATION_UNCONFIRMED,
+                    1L);
+        } catch (RuntimeException counterFailure) {
+            log.error(
+                    "Redis 복제 미확인 Counter 기록 실패 (쿠폰 {}, 예외 타입 {})",
+                    couponId,
+                    counterFailure.getClass().getName());
+        }
     }
 
     public CouponCompensationResult compensate(

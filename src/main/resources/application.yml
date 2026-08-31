@@ -18,6 +18,12 @@ management:
         include: health, info
 
 mocou:
+  issue:
+    replication:
+      # true면 예약 성공 Lua와 같은 Redis 연결에서 WAIT를 실행한다.
+      wait-enabled: ${MOCOU_ISSUE_REPLICATION_WAIT_ENABLED:false}
+      required-replicas: ${MOCOU_ISSUE_REPLICATION_REQUIRED_REPLICAS:1}
+      timeout-ms: ${MOCOU_ISSUE_REPLICATION_TIMEOUT_MS:100}
   lifecycle:
     expiration:
       # 만료 배치 설정의 기본값은 이 파일 한 곳에서만 관리한다. true면 자동 실행, false면 자동 실행 중지.

@@ -64,7 +64,10 @@ abstract class RedisCouponIssueIntegrationTestSupport {
             connection.serverCommands().flushAll();
         }
 
-        gateway = new RedisCouponIssueGateway(redisTemplate);
+        gateway = new RedisCouponIssueGateway(
+                redisTemplate,
+                new CouponIssueReplicationProperties(),
+                new LettuceCouponIssueReplicationWaiter());
 
         setIssuePeriod(
                 ALWAYS_OPEN_AT,
