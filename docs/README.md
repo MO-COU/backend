@@ -1,5 +1,6 @@
 # 문서 안내
 
+- [시스템 아키텍처](./architecture.md)
 - [B1 더미데이터 규격과 적재 가이드](./b1/datagen.md)
 - [B1 정합성 검증 규칙 명세](./b1/consistency-rules.md)
 - [B2 쿠폰 생명주기 정책](./b2/coupon-lifecycle-policy.md)

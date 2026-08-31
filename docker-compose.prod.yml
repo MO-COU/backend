@@ -7,6 +7,12 @@ services:
     image: mysql:8.0
     container_name: mocou-mysql
     restart: unless-stopped
+    # 버퍼 풀 산정 근거는 #210 참조 — working set(데이터+인덱스 1.5GB) + 회원 300만 확장분.
+    # 70% 공식은 앱·Redis와 호스트를 공유하므로 기각. redo 512M은 부하 테스트 INSERT 폭주 시
+    # 강제 체크포인트(쓰기 멈춤 스파이크) 예방. sort_buffer 등은 실측 반증으로 제외.
+    command:
+      - --innodb-buffer-pool-size=4G
+      - --innodb-redo-log-capacity=512M
     environment:
       MYSQL_DATABASE: mocou
       MYSQL_USER: mocou
