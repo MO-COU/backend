@@ -31,6 +31,16 @@ public class RedisAdminCouponDlqFailureRepository {
         this.redisTemplate = redisTemplate;
     }
 
+    /** DLQ 복구마저 소진해 최종 실패로 확정된 건수. XLEN이라 전체 목록을 파싱하지 않는다. */
+    public long count(long couponId) {
+        try {
+            Long size = redisTemplate.opsForStream().size(CouponRedisKey.issueDlqFailedStream(couponId));
+            return size == null ? 0 : size;
+        } catch (DataAccessException exception) {
+            throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "DLQ 최종 실패 건수를 조회할 수 없습니다");
+        }
+    }
+
     public List<AdminCouponDlqFailure> findFailures(long couponId) {
         try {
             List<MapRecord<String, String, String>> records =

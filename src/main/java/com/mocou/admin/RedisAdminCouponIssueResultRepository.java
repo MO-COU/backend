@@ -12,9 +12,12 @@ import org.springframework.stereotype.Repository;
 public class RedisAdminCouponIssueResultRepository {
 
     private final StringRedisTemplate redisTemplate;
+    private final RedisAdminCouponDlqFailureRepository dlqFailureRepository;
 
-    public RedisAdminCouponIssueResultRepository(StringRedisTemplate redisTemplate) {
+    public RedisAdminCouponIssueResultRepository(
+            StringRedisTemplate redisTemplate, RedisAdminCouponDlqFailureRepository dlqFailureRepository) {
         this.redisTemplate = redisTemplate;
+        this.dlqFailureRepository = dlqFailureRepository;
     }
 
     public AdminCouponIssueResultCounts findCounts(long couponId) {
@@ -31,7 +34,7 @@ public class RedisAdminCouponIssueResultRepository {
                     count(counts, "ISSUE_CLOSED"),
                     count(counts, "STOCK_NOT_INITIALIZED"),
                     count(counts, "METADATA_NOT_INITIALIZED"),
-                    count(counts, "COMPENSATED"));
+                    dlqFailureRepository.count(couponId));
         } catch (DataAccessException | ArithmeticException | NumberFormatException exception) {
             throw new BusinessException(
                     ErrorCode.SERVICE_UNAVAILABLE, "실시간 발급 결과를 조회할 수 없습니다");
