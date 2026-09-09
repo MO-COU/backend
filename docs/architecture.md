@@ -83,7 +83,7 @@ ISSUED ──▶ USED
 
 ### Redis 실시간 발급 현황
 
-Redis Hash Counter로 `RESERVED`, `SOLD_OUT`, `DUPLICATE_ISSUE`, `NOT_OPEN_YET`, `ISSUE_CLOSED`, `COMPENSATED`를 집계합니다. 관리자 API는 Redis 예약 수와 DB 적재 수를 함께 반환해 비동기 적재 진행 상태를 보여 줍니다.
+Redis Hash Counter로 `RESERVED`, `SOLD_OUT`, `DUPLICATE_ISSUE`, `NOT_OPEN_YET`, `ISSUE_CLOSED`, `STOCK_NOT_INITIALIZED`, `METADATA_NOT_INITIALIZED`를 집계합니다. 관리자 API는 Redis 예약 수와 DB 적재 수를 함께 반환해 비동기 적재 진행 상태를 보여 줍니다.
 
 ### Redis AOF
 
