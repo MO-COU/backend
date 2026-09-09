@@ -304,10 +304,21 @@ WHERE (i.status = 'USED' AND i.used_at IS NULL)
 위반도 같은 이유로 항목별로 센다. 한 발급 건이 "최초 이력 없음"과 "체인 끊김"을 동시에 어기면 2건이다. 행 단위로 세면 어느 항목이 몇 번 깨졌는지 알 수 없다.
 
 <details>
-<summary><b>판정 쿼리 — 윈도우 함수와 정렬 결정성</b></summary>
+<summary><b>판정 쿼리 — 정렬 결정성과 건수·상세의 분리</b></summary>
 
 ```sql
--- MISSING_INITIAL_HISTORY
+-- MISSING_INITIAL_HISTORY (건수)
+-- 조인 대신 산수로 센다. "최초 이력이 정확히 1건이 아닌 발급" =
+-- (전체 발급) - (최초 이력을 가진 발급) + (2건 이상 가진 발급)
+SELECT (SELECT COUNT(*) FROM coupon_issue) - COUNT(*) + COALESCE(SUM(c > 1), 0)
+FROM (
+    SELECT COUNT(*) AS c
+    FROM coupon_issue_history
+    WHERE from_status = 'UNISSUED' AND to_status = 'ISSUED'
+    GROUP BY coupon_issue_id
+) g
+
+-- MISSING_INITIAL_HISTORY (상세) — 어느 발급 건인지 지목해야 하므로 조인이 필요하다
 SELECT i.coupon_issue_id, COUNT(h.history_id) AS initial_count
 FROM coupon_issue i
 LEFT JOIN coupon_issue_history h
@@ -332,21 +343,23 @@ JOIN last_history l ON l.coupon_issue_id = i.coupon_issue_id AND l.rn = 1
 WHERE i.status <> l.to_status
 
 -- BROKEN_CHAIN
-WITH chain AS (
-    SELECT coupon_issue_id, history_id, from_status,
-           LAG(to_status) OVER (
-               PARTITION BY coupon_issue_id
-               ORDER BY changed_at, history_id
-           ) AS prev_to_status
-    FROM coupon_issue_history
-)
-SELECT coupon_issue_id, history_id, prev_to_status, from_status
-FROM chain
-WHERE prev_to_status IS NOT NULL AND prev_to_status <> from_status
+SELECT h.history_id, prev.to_status AS prev_to_status, h.from_status
+FROM coupon_issue_history h
+JOIN LATERAL (
+    SELECT p.to_status
+    FROM coupon_issue_history p
+    WHERE p.coupon_issue_id = h.coupon_issue_id
+      AND (p.changed_at < h.changed_at
+           OR (p.changed_at = h.changed_at AND p.history_id < h.history_id))
+    ORDER BY p.changed_at DESC, p.history_id DESC
+    LIMIT 1
+) prev ON TRUE
+WHERE prev.to_status <> h.from_status
 ```
 
-- **정렬에 `history_id`를 함께 넣는다.** `changed_at`이 같은 이력이 있을 때 순서가 흔들리면 판정이 실행마다 달라진다.
-- `uk_history_issue_idempotency`의 선두 컬럼이 `coupon_issue_id`라 파티션 단위 접근에는 도움이 되지만, `changed_at` 정렬에서 filesort가 발생할 수 있다. `EXPLAIN`으로 확인하고 결과를 실행계획 분석 항목에 기록한다.
+- **정렬에 `history_id`를 함께 넣는다.** `changed_at`이 같은 이력이 있을 때 순서가 흔들리면 판정이 실행마다 달라진다. `BROKEN_CHAIN`의 `LATERAL` 안쪽 비교식이 복잡한 것도 같은 이유다 — "직전 한 건"을 `(changed_at, history_id)` 사전순으로 못 박아야 결과가 결정적이다.
+- **`MISSING_INITIAL_HISTORY`는 건수와 상세의 식이 다르다.** 건수는 조인 없이 산수로 세고, 상세는 어느 발급 건인지 지목해야 해서 `LEFT JOIN`을 쓴다. 둘이 같은 기준임은 `HistoryChainQueryEquivalenceIntegrationTest`가 원안 건수식을 대조군으로 두고 못 박는다([#208](https://github.com/MO-COU/backend/pull/208)).
+- **`BROKEN_CHAIN`은 윈도우 함수를 쓰지 않는다.** `LAG`로 쓰면 파티션 전체를 버퍼링해 600만 행을 한 번에 물어야 한다. `LATERAL`은 이력 한 줄마다 직전 한 건만 집어오므로 정렬이 사라진다. 판단 근거는 [#173](https://github.com/MO-COU/backend/pull/173)에 있다.
 
 </details>
 
@@ -499,20 +512,24 @@ DB 안에는 대조할 순서가 없다. `issued_at`은 초 단위라 동률이 
 
 #### 등식이 아니라 부등식과 단조성으로 본다
 
-k번째 예약은 순번 k, 잔여 (총재고 − k)를 받으므로 보상이 없는 동안은 합이 총재고와 같다. 그러나 보상은 재고를 `INCR`로 되살리면서 **순번 카운터는 되돌리지 않는다**(되돌리면 이미 더 큰 순번을 받아간 회원과 중복된다). 그래서 보상 이후의 예약부터 합이 커진다.
+k번째 예약은 순번 k, 잔여 (총재고 − k)를 받으므로 재고를 되살리는 일이 없는 동안은 합이 총재고와 같다.
+
+> **현재 코드에는 Redis 재고를 자동으로 되살리는 경로가 없다.** DLQ 최종 실패까지 가도 예약을 그대로 남기고 관리자에게 넘긴다([#217](https://github.com/MO-COU/backend/pull/217)에서 `compensate-coupon.lua`를 제거했다). 그래도 등식으로 검사하지 않는 이유는, **재고를 되살리는 운영 조치가 앞으로 추가되면 등식이 즉시 무너지기 때문**이다. 아래 부등식은 그 경우에도 그대로 성립한다.
+
+재고를 `INCR`로 되살리는 경로가 생긴다면, 그때도 **순번 카운터는 되돌리면 안 된다**(되돌리면 이미 더 큰 순번을 받아간 회원과 중복된다). 그러면 그 이후의 예약부터 합이 커진다.
 
 ```
-issue_sequence + remaining_at_issue = total_quantity + (그때까지의 누적 보상 수)
+issue_sequence + remaining_at_issue = total_quantity + (그때까지 되살린 재고 수)
 ```
 
-누적 보상 수는 늘기만 하므로 항상 성립하는 것은 다음 둘이다.
+되살린 재고 수는 늘기만 하므로 항상 성립하는 것은 다음 둘이다.
 
 ```
 (1) 합 >= total_quantity
 (2) 순번 순으로 정렬했을 때 합이 감소하지 않는다
 ```
 
-등식으로 검사하면 **보상 1건 뒤의 정상 예약이 전부 위반으로 잡혀** 리포트가 엉뚱한 행을 지목한다. 보상이 일어났다는 사실 자체는 아래 `SEQUENCE_GAP`이 구멍으로 드러내므로 역할이 겹치지 않는다.
+등식으로 검사하면 **재고를 되살린 1건 뒤의 정상 예약이 전부 위반으로 잡혀** 리포트가 엉뚱한 행을 지목한다. 재고를 되살린 사실 자체는 아래 `SEQUENCE_GAP`이 구멍으로 드러내므로 역할이 겹치지 않는다.
 
 #### 위반 판정 (4항목)
 
@@ -527,7 +544,7 @@ issue_sequence + remaining_at_issue = total_quantity + (그때까지의 누적 �
 
 `MIN = 1`은 따로 보지 않는다. 중복이 없고 최대가 건수와 같으면, 서로 다른 값 N개의 최댓값이 N이므로 1..N이 강제된다.
 
-`SEQUENCE_GAP`의 원인은 **보상**(정상 동작의 흔적) 또는 **유실**(사고) 둘이다. DB만으로 가르지 못하지만 어느 쪽이든 알아야 할 신호라 위반으로 본다. 시연 기준으로는 보상 0건이 정상이다.
+`SEQUENCE_GAP`의 원인은 **재고를 되살린 흔적**(운영 조치) 또는 **유실**(사고) 둘이다. DB만으로 가르지 못하지만 어느 쪽이든 알아야 할 신호라 위반으로 본다. 현재는 자동으로 재고를 되살리는 경로가 없으므로 **0건이 정상**이다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -582,5 +599,4 @@ issue_sequence + remaining_at_issue = total_quantity + (그때까지의 누적 �
 | --- | --- |
 | 구조상 통과하는 규칙 | `R1`·`R3`은 현재 데이터에서 위반이 나올 수 없다. 규칙별 통합 테스트가 위반을 주입해 검출력을 확인하는 것으로 보완한다(`R7`) |
 | 유예 시간 결합 | `G`는 만료 배치 주기(`fixed-delay-ms`)에서 파생한다. 검증기가 이 설정을 읽어야 하므로 B2 설정에 대한 의존이 생긴다. 배치 주기를 검증기가 알 수 없는 환경(별도 프로세스 실행 등)에서는 유예를 명시적으로 넘겨야 한다 |
-| 실행계획 미확인 | `EXPLAIN` 분석은 아직이다. `R5`의 `BROKEN_CHAIN`이 가장 무겁다 — 600만 행을 발급 건별로 정렬해야 해서 나머지 규칙을 전부 합친 것보다 오래 걸린다 |
 | `R8` 선행 조건 | 발급이 진행 중이면 `R8`은 판정 불가로 남고 전체 판정이 `ERROR`가 된다. 부하 테스트가 끝나 스트림이 비워진 뒤 실행해야 한다 |
