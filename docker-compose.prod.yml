@@ -71,9 +71,6 @@ services:
       #
       # accept-count는 아래 sysctls의 somaxconn과 같은 값(32768)으로 맞춘다. 커널 값이 더
       # 작으면 accept-count가 그 선에서 잘리므로, 한쪽만 올리면 조용히 무효가 된다.
-      # threads.max 200은 실측 근거다 - 2만 스파이크에서 200과 400의 p95가 같았고
-      # (콜드 6328 vs 6194, 웜 3531 vs 3510ms) 요청 하나가 Redis Lua 수 ms라
-      # 스레드가 즉시 반납되기 때문이다. p95를 가르는 것은 스레드가 아니라 JVM 워밍업이었다.
       SERVER_TOMCAT_MAX_CONNECTIONS: ${SERVER_TOMCAT_MAX_CONNECTIONS:-30000}
       SERVER_TOMCAT_ACCEPT_COUNT: ${SERVER_TOMCAT_ACCEPT_COUNT:-32768}
       SERVER_TOMCAT_THREADS_MAX: ${SERVER_TOMCAT_THREADS_MAX:-200}

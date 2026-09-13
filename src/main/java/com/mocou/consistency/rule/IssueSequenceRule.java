@@ -74,25 +74,27 @@ class IssueSequenceRule implements ConsistencyRule {
      * 두 카운터가 따로 놀았는지 본다.
      *
      * <p>Lua는 예약 성공 순간 재고를 {@code DECR}하고 순번을 {@code INCR}한다. 서로 다른 키를 건드리는 별개의 카운터라
-     * k번째 예약은 순번 k, 잔여 (총재고 − k)를 받는다. 그래서 보상이 없는 동안은 다음이 성립한다.
+     * k번째 예약은 순번 k, 잔여 (총재고 − k)를 받는다. 그래서 재고를 되살리는 일이 없는 동안은 다음이 성립한다.
      *
      * <pre>issue_sequence + remaining_at_issue = total_quantity</pre>
      *
-     * <p><b>그런데 등식으로 검사하면 안 된다.</b> 보상({@code compensate-coupon.lua})은 재고를 {@code INCR}로
-     * 되살리면서 순번 카운터는 되돌리지 않는다. 되돌리면 이미 더 큰 순번을 받아간 회원과 중복되기 때문이고, 그게 옳다. 대신 보상
-     * 이후의 예약부터는 합이 커진다.
+     * <p><b>그런데 등식으로 검사하면 안 된다.</b> 지금은 Redis 재고를 자동으로 되살리는 경로가 없지만(예전의
+     * {@code compensate-coupon.lua}는 제거됐다), 그런 운영 조치가 추가되면 등식은 즉시 무너진다. 재고를
+     * {@code INCR}로 되살리더라도 순번 카운터는 되돌릴 수 없기 때문이다 — 되돌리면 이미 더 큰 순번을 받아간 회원과
+     * 중복된다. 그러면 그 이후의 예약부터 합이 커진다.
      *
-     * <pre>issue_sequence + remaining_at_issue = total_quantity + (그때까지의 누적 보상 수)</pre>
+     * <pre>issue_sequence + remaining_at_issue = total_quantity + (그때까지 되살린 재고 수)</pre>
      *
-     * <p>누적 보상 수는 늘기만 하므로 항상 성립하는 것은 <b>부등식과 단조성</b> 둘이다.
+     * <p>되살린 재고 수는 늘기만 하므로 항상 성립하는 것은 <b>부등식과 단조성</b> 둘이다.
      *
      * <pre>
      * (1) 합 &gt;= total_quantity
      * (2) 순번 순으로 정렬했을 때 합이 감소하지 않는다
      * </pre>
      *
-     * <p>(2)가 깨지면 보상으로는 설명할 수 없다. 등식으로 검사하면 보상 1건 뒤의 <b>정상 예약이 전부 위반으로 잡혀</b> 리포트가
-     * 엉뚱한 행을 지목한다. 보상이 실제로 났다는 사실은 {@link #SEQUENCE_GAP}이 구멍으로 드러내므로 역할이 겹치지도 않는다.
+     * <p>(2)가 깨지면 재고를 되살린 것으로는 설명할 수 없다. 등식으로 검사하면 되살린 1건 뒤의 <b>정상 예약이 전부 위반으로
+     * 잡혀</b> 리포트가 엉뚱한 행을 지목한다. 되살린 사실 자체는 {@link #SEQUENCE_GAP}이 구멍으로 드러내므로 역할이
+     * 겹치지도 않는다.
      *
      * <p>{@code LAG}는 {@link HistoryChainRule}에서 걷어낸 윈도우 함수지만 여기서는 다르다. 거기는 이력 599만 행
      * 전체를 버퍼에 쌓았고, 여기는 {@code issue_sequence IS NOT NULL}이 더미 300만 건을 걷어내 부하 테스트분만 남는다.
