@@ -7,8 +7,6 @@ server:
     max-connections: ${SERVER_TOMCAT_MAX_CONNECTIONS:30000}
     accept-count: ${SERVER_TOMCAT_ACCEPT_COUNT:32768}
     threads:
-      # 2만 스파이크에서 200과 400의 p95가 같았다(콜드 6328 vs 6194, 웜 3531 vs 3510ms).
-      # 요청 하나가 Redis Lua 수 ms라 스레드가 즉시 반납되어 200으로 충분하다.
       max: ${SERVER_TOMCAT_THREADS_MAX:200}
 
 spring:
