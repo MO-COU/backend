@@ -24,7 +24,7 @@ docker compose exec redis redis-cli GET "coupon:{301}:stock"     # 10000
 | 상황 | 명령 | 소요 |
 | --- | --- | --- |
 | **회차를 새로 만든다** | `curl -X POST '.../api/admin/coupons' -d '{...}'` | 즉시 |
-| **부하 테스트를 다시 돌린다** | `curl -X POST '.../api/admin/load-test/reset?couponId=302'` | 몇 초 |
+| **부하 테스트를 다시 돌린다** | `curl -X POST '.../api/admin/load-test/reset?couponId=301'` | 몇 초 |
 | 더미데이터를 처음부터 다시 만든다 | [4.4.2 전체 초기화](#442-전체-초기화) → 재적재 | 10분 남짓 |
 | 소규모로 빠르게 확인한다 | `--mocou.datagen.member-count=10000 --mocou.datagen.round-count=3` | 수 초 |
 
@@ -287,7 +287,7 @@ DB 데이터까지 다시 만들려면 [4.4.2 전체 초기화](#442-전체-초�
 #### 4.4.1 부하 테스트 리셋
 
 ```bash
-curl -X POST 'http://localhost:8080/api/admin/load-test/reset?couponId=302'
+curl -X POST 'http://localhost:8080/api/admin/load-test/reset?couponId=301'
 ```
 
 지정한 회차만 발급 직전 상태로 되돌린다. **지난 회차의 발급 300만 건과 회원 100만은 건드리지 않는다.**

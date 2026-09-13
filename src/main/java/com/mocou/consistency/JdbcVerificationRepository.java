@@ -146,7 +146,8 @@ public class JdbcVerificationRepository implements VerificationRepository {
     }
 
     /**
-     * 위반 상세는 묶어서 보낸다. 규칙 7개가 각각 상한(1000건)까지 채우면 최악 7000행이라, 한 건씩 넣으면 왕복이 그만큼 발생한다.
+     * 위반 상세는 묶어서 보낸다. 규칙마다 상한({@code violation-limit}, 기본 1000건)까지 채우면 그 배수만큼 쌓이므로,
+     * 한 건씩 넣으면 왕복이 그만큼 발생한다.
      */
     private void insertViolations(
             long ruleResultId, RuleOutcome outcome, LocalDateTime detectedAt) {
