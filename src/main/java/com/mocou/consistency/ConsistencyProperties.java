@@ -20,4 +20,4 @@ import org.springframework.validation.annotation.Validated;
 public record ConsistencyProperties(
         @Min(1) @DefaultValue("1000") int violationLimit,
         @Min(1) @DefaultValue("5") int graceMultiplier,
-        @Min(1) @DefaultValue("30") int staleRunMinutes) {}
+        @Min(1) @DefaultValue("5") int staleRunMinutes) {}
