@@ -3,6 +3,8 @@ package com.mocou.consistency.rule;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.mocou.consistency.ConsistencyRule;
+import com.mocou.consistency.RedisSyncBaseline;
+import com.mocou.consistency.RedisSyncBaselineReader;
 import com.mocou.consistency.RuleOutcome;
 import com.mocou.consistency.RuleStatus;
 import com.mocou.consistency.VerificationContext;
@@ -11,10 +13,14 @@ import com.mocou.consistency.ViolationTarget;
 import com.mocou.issue.CouponRedisKey;
 import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
 import com.mocou.support.MySqlContainerTest;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +31,9 @@ import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -69,6 +77,8 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
     @Autowired private List<ConsistencyRule> rules;
     @Autowired private NamedParameterJdbcTemplate namedJdbcTemplate;
     @Autowired private StringRedisTemplate redisTemplate;
+    @Autowired private RedisSyncBaselineReader syncReader;
+    @Autowired private DataSource dataSource;
 
     private VerificationContext context;
 
@@ -311,12 +321,105 @@ class RedisDbMismatchRuleIntegrationTest extends MySqlContainerTest {
         assertThat(outcome.checkedCount()).isZero();
     }
 
+    /**
+     * 스냅샷을 연 뒤 R8이 돌기 전에 컨슈머가 남은 발급을 DB에 넣고 끝낸 경우. R8이 도는 시점에는 스트림이 비어 있지만 그 발급은
+     * 스냅샷에 없다. 이 시점만 보면 실제로는 일치하는 두 저장소를 유실과 재고 불일치로 판정한다.
+     */
+    @Test
+    @DisplayName("스냅샷을 연 뒤에 동기화가 끝나면 판정하지 않는다")
+    void refusesToJudgeWhenSyncFinishesAfterSnapshot() throws Exception {
+        // given - 회원 3의 예약이 아직 스트림에 남아 DB에 없다
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "3", 3);
+        redisTemplate.opsForValue().set(CouponRedisKey.stock(COUPON_ID), String.valueOf(TOTAL_QUANTITY - 3));
+        String streamKey = CouponRedisKey.issueStream(COUPON_ID);
+        RecordId recordId = redisTemplate.opsForStream().add(streamKey, Map.of("memberId", "3"));
+        VerificationContext started = context.withRedisSyncBaseline(syncReader.capture());
+
+        try (Connection connection = dataSource.getConnection()) {
+            NamedParameterJdbcTemplate snapshot = openSnapshot(connection);
+
+            // 스냅샷을 연 뒤 컨슈머가 회원 3을 넣고 스트림을 비운다
+            insertIssue(3, 3);
+            jdbcTemplate.update(
+                    "UPDATE coupon_stock SET remaining_quantity = ? WHERE coupon_id = ?",
+                    TOTAL_QUANTITY - 3,
+                    COUPON_ID);
+            redisTemplate.opsForStream().delete(streamKey, recordId);
+
+            // when
+            RuleOutcome outcome = rule().check(snapshot, started);
+            connection.commit();
+
+            // then
+            assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
+            assertThat(outcome.violationCount()).isZero();
+            assertThat(outcome.failureReason()).contains("동기화되지 않았다");
+        }
+    }
+
+    /** 규칙이 동기화 상태를 본 뒤 Redis를 다 읽기 전에 예약이 들어오면, 그 예약은 Redis에만 보인다. */
+    @Test
+    @DisplayName("검증 도중 발급이 진행되면 판정하지 않는다")
+    void refusesToJudgeWhenIssuingDuringVerification() {
+        // given
+        redisTemplate.opsForValue().set(CouponRedisKey.issueSequence(COUPON_ID), "2");
+        VerificationContext started = context.withRedisSyncBaseline(syncReader.capture());
+        redisTemplate.opsForZSet().add(CouponRedisKey.issuedMembers(COUPON_ID), "3", 3);
+        redisTemplate.opsForValue().increment(CouponRedisKey.issueSequence(COUPON_ID));
+
+        // when
+        RuleOutcome outcome = rule().check(namedJdbcTemplate, started);
+
+        // then
+        assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
+        assertThat(outcome.violationCount()).isZero();
+        assertThat(outcome.failureReason()).contains("검증 도중", "2 → 3");
+    }
+
+    @Test
+    @DisplayName("시작 전 동기화 상태를 기록하지 않았으면 판정하지 않는다")
+    void refusesToJudgeWithoutBaseline() {
+        // when
+        RuleOutcome outcome = rule().check(namedJdbcTemplate, context);
+
+        // then
+        assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
+        assertThat(outcome.failureReason()).contains("기록하지 않아");
+    }
+
+    @Test
+    @DisplayName("검증 시작 뒤에 열린 회차는 판정하지 않는다")
+    void refusesToJudgeCouponOpenedAfterStart() {
+        // given
+        VerificationContext started = context.withRedisSyncBaseline(RedisSyncBaseline.of(Map.of()));
+
+        // when
+        RuleOutcome outcome = rule().check(namedJdbcTemplate, started);
+
+        // then
+        assertThat(outcome.status()).isEqualTo(RuleStatus.FAILED);
+        assertThat(outcome.failureReason()).contains("검증 시작 뒤에 열린 회차");
+    }
+
+    /** 실행기와 같은 순서로, 규칙을 돌리기 직전에 동기화 상태를 기록한다. */
     private RuleOutcome outcome() {
+        return rule().check(namedJdbcTemplate, context.withRedisSyncBaseline(syncReader.capture()));
+    }
+
+    private ConsistencyRule rule() {
         return rules.stream()
                 .filter(rule -> rule.rule() == VerificationRule.REDIS_DB_MISMATCH)
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("규칙 구현이 없다"))
-                .check(namedJdbcTemplate, context);
+                .orElseThrow(() -> new IllegalStateException("규칙 구현이 없다"));
+    }
+
+    private NamedParameterJdbcTemplate openSnapshot(Connection connection) throws SQLException {
+        connection.setAutoCommit(false);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("START TRANSACTION WITH CONSISTENT SNAPSHOT");
+        }
+        return new NamedParameterJdbcTemplate(
+                new JdbcTemplate(new SingleConnectionDataSource(connection, true)));
     }
 
     private void insertMember(long memberId) {

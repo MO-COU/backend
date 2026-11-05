@@ -42,6 +42,7 @@ public class ConsistencyVerifier {
     private final List<ConsistencyRule> rules;
     private final VerificationRepository repository;
     private final ConsistencyProperties properties;
+    private final RedisSyncBaselineReader redisSyncBaselineReader;
     private final long expirationDelayMillis;
 
     public ConsistencyVerifier(
@@ -49,11 +50,13 @@ public class ConsistencyVerifier {
             List<ConsistencyRule> rules,
             VerificationRepository repository,
             ConsistencyProperties properties,
+            RedisSyncBaselineReader redisSyncBaselineReader,
             @Value("${mocou.lifecycle.expiration.fixed-delay-ms}") long expirationDelayMillis) {
         this.dataSource = dataSource;
         this.rules = rules;
         this.repository = repository;
         this.properties = properties;
+        this.redisSyncBaselineReader = redisSyncBaselineReader;
         this.expirationDelayMillis = expirationDelayMillis;
     }
 
@@ -108,8 +111,12 @@ public class ConsistencyVerifier {
      *
      * <p>{@link SingleConnectionDataSource}로 감싸는 이유는 규칙들이 풀에서 다른 커넥션을 빌리지 못하게 하기
      * 위해서다. 그러면 애써 연 트랜잭션 밖에서 읽게 되어 규칙마다 다른 시점을 본다.
+     *
+     * <p>Redis 동기화 상태는 스냅샷을 열기 <b>전에</b> 기록한다. 이 시점에 동기화가 끝나 있어야 그때까지 커밋된 발급이 모두
+     * 스냅샷에 들어 있다고 말할 수 있다.
      */
     private SnapshotRun runRulesOnSnapshot() {
+        RedisSyncBaseline redisSyncBaseline = redisSyncBaselineReader.capture();
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
             try (Statement statement = connection.createStatement()) {
@@ -123,7 +130,12 @@ public class ConsistencyVerifier {
             LocalDateTime snapshotAt =
                     jdbcTemplate.queryForObject(SNAPSHOT_TIME_SQL, Map.of(), LocalDateTime.class);
             VerificationContext context =
-                    new VerificationContext(snapshotAt, graceSeconds(), properties.violationLimit());
+                    new VerificationContext(
+                            snapshotAt,
+                            graceSeconds(),
+                            properties.violationLimit(),
+                            new CountCache(),
+                            redisSyncBaseline);
 
             List<RuleOutcome> outcomes = checkAll(jdbcTemplate, context);
             connection.commit();
