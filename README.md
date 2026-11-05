@@ -8,7 +8,7 @@
 
 ### Backend
 ![Java](https://img.shields.io/badge/Java%2021-007396?style=flat&logo=openjdk&logoColor=white)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot%204.1.0-6DB33F?style=flat&logo=springboot&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot%204.1.0--RC1-6DB33F?style=flat&logo=springboot&logoColor=white)
 ![Spring Batch](https://img.shields.io/badge/Spring%20Batch-6DB33F?style=flat&logo=spring&logoColor=white)
 ![Gradle](https://img.shields.io/badge/Gradle%209-02303A?style=flat&logo=gradle&logoColor=white)
 
@@ -48,32 +48,30 @@ MOCOU는 **Redis를 발급 처리의 진입점으로 사용하고 Redis Stream�
 
 ## 🏗 System Architecture
 
-<!-- 시스템 아키텍처 이미지는 이 위치에 추가하세요. -->
-<!-- 예: <img src="https://github.com/user-attachments/assets/2992ba1d-bad5-4e39-ab93-ede97f1bddca" width="100%" alt="MOCOU 시스템 아키텍처"> -->
- <img src="https://github.com/user-attachments/assets/2992ba1d-bad5-4e39-ab93-ede97f1bddca" width="100%" alt="MOCOU 시스템 아키텍처">
+<img src="https://github.com/user-attachments/assets/2992ba1d-bad5-4e39-ab93-ede97f1bddca" width="100%" alt="MOCOU 시스템 아키텍처">
 
 시스템의 전체 구성과 발급 처리·장애 복구·운영 아키텍처는 [아키텍처 문서](./docs/architecture.md)에서 확인할 수 있습니다.
 
 ## 📊 Load Test
 
-k6로 점진 증가(Ramp), 순간 동시 요청(20,000 VU), 실제 사용자 유입과 유사한 Ramp Once, 고정 RPS, 제한적 반복 요청을 재현했습니다. 기본 쿠폰 재고는 **10,000장**입니다.
+k6로 점진 증가(Ramp), 순간 동시 요청(20,000·50,000 VU), 실제 사용자 유입과 유사한 Ramp Once, 고정 RPS, 제한적 반복 요청을 재현했습니다. 기본 쿠폰 재고는 **10,000장**입니다.
 
 ### 주요 검증 기준
 
 ```text
+쿠폰별 회원 발급 수 ≤ 1
 발급 수 ≤ 총 재고
-회원별 발급 수 ≤ 1
 DB 발급 수 + DB 잔여 재고 = 총 재고
-Redis 발급 회원 = DB 발급 회원
-Redis Stream 미처리 Event = 0
-Consumer Pending = 0
+Redis 발급 회원 = DB 발급 회원, Redis 재고 = DB 잔여 재고
 ```
 
-<!-- 최종 부하 테스트 결과 이미지 또는 표는 이 위치에 추가하세요. -->
+이 밖에 상태·시각 모순, 상태 이력 체인, 참조 무결성, 예약 순번을 검사합니다. 검사는 발급 300만 건을 포함한 DB 전체를 한 스냅샷 위에서 실행하며, Redis Stream 미처리 이벤트·Consumer Pending·DLQ가 남아 있으면 판정하지 않고 `ERROR`로 기록합니다. 규칙 전체는 [정합성 검증 규칙 명세](./docs/b1/consistency-rules.md)에 있습니다.
+
+동시성 제어 방식 6가지(DB 3종, Redis 3종)를 같은 조건에서 비교한 결과는 [MO-COU/load-test](https://github.com/MO-COU/load-test)에 있습니다.
 
 ## 🧪 Test Strategy
 
-JUnit 5와 Testcontainers를 이용해 실제 MySQL·Redis 환경에서 Redis Lua 동시성, Stream Event 생성, Consumer DB 적재, PEL·DLQ 복구, 정합성, 쿠폰 상태 전이, Spring Batch, Transactional Outbox, 관리자 API를 검증합니다.
+JUnit 5와 Testcontainers를 이용해 실제 MySQL·Redis 환경에서 Redis Lua 동시성, Stream Event 생성, Consumer DB 적재, PEL·DLQ 복구, 정합성, 쿠폰 상태 전이, Spring Batch, Transactional Outbox, 관리자 API를 검증합니다. 테스트가 MySQL·Redis 컨테이너를 직접 띄우므로 Docker가 실행 중이어야 합니다.
 
 ```bash
 ./gradlew test
@@ -86,7 +84,7 @@ JUnit 5와 Testcontainers를 이용해 실제 MySQL·Redis 환경에서 Redis Lu
 | 권도하 | 공통 기능 및 배포·운영 환경 |
 | 권혁준 | 쿠폰 생명주기, 만료 Batch, Redis 발급 현황, 운영 로그 및 S3 백업 |
 | 박서희 | 관리자 API, k6 부하 테스트 및 AWS SSM 자동 실행 |
-| 장근창 | 대용량 데이터 생성 및 Redis·DB 정합성 검증 |
+| 장근창 (팀장) | 대용량 데이터 생성, Redis·DB 정합성 검증과 검증 쿼리 튜닝, 동시성 제어 비교 실험 설계·측정([load-test](https://github.com/MO-COU/load-test)) |
 | 조현빈 | Redis Stream Consumer, 재처리·DLQ, Transactional Outbox |
 | 지창민 | Redis Lua 발급, 재고·중복 제어, 발급 순번 및 Redis 상태 관리 |
 
@@ -96,11 +94,12 @@ JUnit 5와 Testcontainers를 이용해 실제 MySQL·Redis 환경에서 Redis Lu
 src/main/java/com/mocou/
 ├── global/          # 공통 설정, 예외, 응답, Logging
 ├── member/          # 회원
-├── coupon/          # 쿠폰 및 재고
+├── coupon/          # 회차 추가 / 삭제
 ├── issue/           # Redis 발급 / Stream / Consumer
 ├── lifecycle/       # 쿠폰 사용 / 만료 / Batch
 ├── consistency/     # 데이터 정합성 검증
 ├── admin/           # 관리자 API
+├── loadtest/        # 부하 테스트 실행 / 리셋
 ├── notification/    # Transactional Outbox / 알림
 └── datagen/         # 대용량 테스트 데이터 생성
 ```
@@ -115,13 +114,15 @@ src/main/java/com/mocou/
 
 ```bash
 docker compose up -d
-./gradlew bootRun
+./gradlew bootRun --args='--spring.profiles.active=local,datagen'   # 첫 실행: 회원 100만 + 발급 300만 적재 후 기동
+./gradlew bootRun                                                   # 이후 실행
 ./gradlew test
 ```
 
 ## 📚 Documents
 
 * [아키텍처](./docs/architecture.md)
+* [더미데이터 규격과 적재 가이드](./docs/b1/datagen.md)
 * [정합성 검증 규칙 명세](./docs/b1/consistency-rules.md)
 * [쿠폰 생명주기 정책](./docs/b2/coupon-lifecycle-policy.md)
 * [쿠폰 만료 배치 가이드](./docs/b2/coupon-expiration-batch-guide.md)
