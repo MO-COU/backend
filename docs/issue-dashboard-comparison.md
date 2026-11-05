@@ -25,3 +25,5 @@
 ## 범위 경계
 
 현재 브랜치에서는 Redis 조회 API만 구현한다. 폴링 화면은 이 API를 소비하는 별도 프론트엔드의 범위다. Prometheus registry 의존성, `/actuator/prometheus` 노출, Prometheus 설정, Grafana provisioning과 대시보드 JSON은 #125에서 결정하고 추가한다.
+
+> #125는 구현하지 않기로 하고 닫혔다. 발급 현황은 Redis 카운터 조회 API로 제공한다.

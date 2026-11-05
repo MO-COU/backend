@@ -91,7 +91,7 @@ Redis에는 재고뿐 아니라 아직 DB에 반영되지 않은 Stream Event도
 
 ```text
 appendonly yes
-appendfsync everysec
+appendfsync always
 ```
 
 ### ERROR Log S3 Backup
@@ -100,7 +100,7 @@ appendfsync everysec
 Spring Boot → system-error.log → 날짜/10MB Rolling → .gz Archive → EC2 Cron → AWS S3
 ```
 
-ERROR 이상 로그는 날짜 또는 10MB 기준으로 롤링하고 Docker Named Volume에 보관합니다. 매일 S3에 업로드하며, 실패하면 다음 실행에서 재시도하고, 업로드 확인 후 로컬 로그를 삭제합니다. S3 Lifecycle은 90일 보관을 적용합니다.
+ERROR 이상 로그는 날짜 또는 10MB 기준으로 롤링하고 Docker Named Volume에 보관합니다. 매일 S3에 업로드하며, 실패하면 다음 실행에서 재시도합니다. 로컬 아카이브는 S3 업로드가 확인되고 7일이 지나면 삭제합니다. S3 Lifecycle은 90일 보관을 적용합니다.
 
 ## 인프라 구성
 

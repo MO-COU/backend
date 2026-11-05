@@ -36,7 +36,7 @@
 |---|---|---|
 | 발급 성공 (`RESERVED`) | 발급 기간 중, 재고가 있고, 해당 회원이 처음 발급을 요청 | 발생 |
 | 재고 소진 (`SOLD_OUT`) | 발급 기간 중 Redis 재고가 0 이하인 요청 | 발생 |
-| 중복 발급 (`DUPLICATE_ISSUE`) | 이미 `issued-members` Set에 있는 회원의 재요청 | 발생 |
+| 중복 발급 (`DUPLICATE_ISSUE`) | 이미 `issued-members` Sorted Set에 있는 회원의 재요청 | 발생 |
 | 발급 시작 전 (`NOT_OPEN_YET`) | Redis 서버 시간이 `openAtEpochSecond`보다 이른 요청 | 기본 스크립트에서는 미발생 |
 | 발급 종료 (`ISSUE_CLOSED`) | Redis 서버 시간이 `closeAtEpochSecond`와 같거나 지난 요청 | 기본 스크립트에서는 미발생 |
 | 재고 미초기화 (`STOCK_NOT_INITIALIZED`) | `coupon:{couponId}:stock` 키가 없는 상태의 요청 | 정상 초기화된 기본 스크립트에서는 미발생 |
