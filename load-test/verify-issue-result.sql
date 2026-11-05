@@ -3,7 +3,7 @@
 SET @coupon_id = COALESCE(@coupon_id, 301);
 
 -- k6 직후 빠르게 확인하는 쿠폰 단위 사전 점검이다.
--- 공식 최종 판정은 docs/b1/consistency-rules.md의 R1~R7 검증 결과를 사용한다.
+-- 공식 최종 판정은 docs/b1/consistency-rules.md의 정합성 검증 결과를 사용한다.
 SELECT
     check_name,
     expected_value,
