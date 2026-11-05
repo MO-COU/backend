@@ -86,15 +86,14 @@ Docker 안에서 `localhost`는 Mac이 아니라 k6 컨테이너 자신을 가�
 
 ### 테스트마다 먼저 초기화
 
-Consumer가 Redis Stream 처리를 마친 뒤 테스트 쿠폰 데이터만 초기화한다. 다른 쿠폰이나 Redis 전체 데이터는 지우지 않는다.
+Consumer가 Redis Stream 처리를 마친 뒤 테스트 쿠폰만 초기화한다. 다른 쿠폰이나 Redis 전체 데이터는 지우지 않는다. 둘 중 하나를 쓴다.
 
-1. 테스트 쿠폰의 검증 결과와 발급 이력을 DB에서 삭제한다.
-2. `coupon_stock.remaining_quantity`를 테스트 재고로 되돌린다.
-3. 해당 쿠폰의 Redis 재고·회원·메타데이터·Stream Key만 삭제한다.
-4. DB 기준 Redis 초기화를 다시 실행한다.
-5. Redis 재고와 DB 재고가 같은지 확인한다.
+| 방법 | 명령 |
+| --- | --- |
+| 같은 회차를 발급 직전 상태로 되돌린다 | `curl -X POST 'http://localhost:8080/api/admin/load-test/reset?couponId=301'` |
+| 회차를 지우고 새 회차를 만든다 | `curl -X DELETE 'http://localhost:8080/api/admin/coupons/{couponId}'` 후 `curl -X POST 'http://localhost:8080/api/admin/coupons' ...` |
 
-현재 초기화 서비스는 기존 Redis Key가 있으면 값을 덮어쓰지 않는다. 따라서 DB 재고만 되돌리면 초기화되지 않으며, 해당 쿠폰 Key 삭제가 먼저 필요하다.
+두 API 모두 DB와 Redis를 함께 정리하고, Consumer가 아직 처리 중인 발급이 있으면 `409`로 거부한다. 자세한 내용은 [`docs/b1/datagen.md`](../docs/b1/datagen.md)의 4.4\~4.6절을 참고한다.
 
 ### 1. 스모크 테스트 (로컬 검증용)
 ```bash
@@ -183,7 +182,7 @@ HAVING COUNT(*) > 1;
 `202 Accepted`는 Redis 예약 성공을 뜻한다. DB 적재 완료는 Redis Stream 처리가 끝난 뒤 위 SQL과 B팀 정합성 검증 결과로 별도 확인한다.
 
 전체 검증 절차와 결과 기록 형식은 [`docs/test/full-issue-flow-verification.md`](../docs/test/full-issue-flow-verification.md)를 참고한다.
-DB 사전 점검은 `load-test/verify-issue-result.sql`을 실행하면 발급 건수, 잔여 재고, 중복 발급과 발급 이력 불일치를 한 번에 확인할 수 있다. 공식 최종 판정은 [`docs/b1/consistency-rules.md`](../docs/b1/consistency-rules.md)의 R1~R7 검증 결과를 사용한다.
+DB 사전 점검은 `load-test/verify-issue-result.sql`을 실행하면 발급 건수, 잔여 재고, 중복 발급과 발급 이력 불일치를 한 번에 확인할 수 있다. 공식 최종 판정은 [`docs/b1/consistency-rules.md`](../docs/b1/consistency-rules.md)의 정합성 검증 결과를 사용한다.
 
 전체 흐름은 아래 명령으로 실행할 수 있다. 아직 Consumer가 연결되지 않은 경우 검증 옵션을 `false`로 둔다.
 
