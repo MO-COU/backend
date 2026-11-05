@@ -1,7 +1,6 @@
 package com.mocou.loadtest;
 
 import java.util.Objects;
-import java.util.Set;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -119,15 +118,7 @@ public class LoadTestResetService {
      * 지난 회차의 유령 이벤트가 DLQ 복구 컨슈머에 의해 되살아난다.
      */
     private void deleteRedisKeys(long couponId) {
-        redisTemplate.delete(
-                Set.of(
-                        CouponRedisKey.stock(couponId),
-                        CouponRedisKey.metadata(couponId),
-                        CouponRedisKey.issuedMembers(couponId),
-                        CouponRedisKey.issueStream(couponId),
-                        CouponRedisKey.issueDlqStream(couponId),
-                        CouponRedisKey.issueResultCounts(couponId),
-                        CouponRedisKey.issueSequence(couponId)));
+        redisTemplate.delete(CouponRedisKey.allIssueKeys(couponId));
     }
 
     /**

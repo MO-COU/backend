@@ -220,6 +220,20 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
     }
 
     @Test
+    @DisplayName("리셋 뒤 지난 회차의 최종 실패 목록이 남지 않는다")
+    void clearsDlqFailedStreamAfterReset() {
+        // given
+        String dlqFailedStreamKey = CouponRedisKey.issueDlqFailedStream(DEMO_COUPON_ID);
+        redisTemplate.opsForStream().add(dlqFailedStreamKey, Map.of("memberId", "5"));
+
+        // when
+        resetService.reset(DEMO_COUPON_ID);
+
+        // then
+        assertThat(redisTemplate.hasKey(dlqFailedStreamKey)).isFalse();
+    }
+
+    @Test
     @DisplayName("미확인 건수를 조회하지 못하면 되돌리지 않는다")
     void rejectsWhenPendingCountCannotBeRead() {
         // given - 그룹이 없다는 응답(NOGROUP)이 아닌 Redis 오류
