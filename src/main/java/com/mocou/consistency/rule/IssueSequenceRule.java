@@ -99,11 +99,17 @@ class IssueSequenceRule implements ConsistencyRule {
      * <p>{@code LAG}는 {@link HistoryChainRule}에서 걷어낸 윈도우 함수지만 여기서는 다르다. 거기는 이력 599만 행
      * 전체를 버퍼에 쌓았고, 여기는 {@code issue_sequence IS NOT NULL}이 더미 300만 건을 걷어내 부하 테스트분만 남는다.
      * 같은 도구라도 보는 데이터가 다르면 답이 달라진다.
+     *
+     * <p>다만 그 필터가 먼저 걸리려면 {@code coupon_issue}에서 출발해야 한다. 옵티마이저는 행 수가 적은
+     * {@code coupon_stock}(회차 수만큼)을 앞에 두는 쪽을 싸다고 보는데, 그러면 회차마다 {@code uk_issue_coupon_member}로
+     * 발급 행을 전부 찾아 300만 건을 인덱스 탐색으로 읽은 뒤에야 거른다. 순번이 있는 행이 몇 건이든 비용이 같다. 조인 순서를
+     * 힌트로 고정한다. 힌트를 적용하지 못하면 경고만 내고 무시되어 느려질 뿐 결과는 같다.
      */
     private static final String DIVERGED_CONDITION =
             """
             WITH sequenced AS (
-                SELECT i.coupon_issue_id,
+                SELECT /*+ JOIN_ORDER(i, s) */
+                       i.coupon_issue_id,
                        i.coupon_id,
                        i.issue_sequence,
                        i.issue_sequence + i.remaining_at_issue AS total_at_issue,
