@@ -39,9 +39,6 @@ public enum ErrorCode {
     VERIFICATION_ALREADY_RUNNING(HttpStatus.CONFLICT, "이미 진행 중인 정합성 검증이 있습니다"),
 
     // 부하 테스트 리셋
-    // 되돌릴 대상은 서버가 정한다. 발급을 여는 쿠폰이 하나여야 어느 회차를 되돌릴지 정해지며,
-    // 없거나 둘 이상이면 사람이 판단해야 한다.
-    LOAD_TEST_TARGET_NOT_UNIQUE(HttpStatus.CONFLICT, "되돌릴 대상 쿠폰을 특정할 수 없습니다"),
     // 컨슈머가 읽어간 발급은 리셋이 끝난 뒤 DB에 들어올 수 있다. 그러면 지운 발급이 되살아난다.
     LOAD_TEST_SYNC_IN_PROGRESS(HttpStatus.CONFLICT, "아직 DB로 반영되지 않은 발급이 남아 있습니다"),
     // 종료된 회차에는 검증 대상인 더미데이터가 들어 있다. 되돌리면 복구할 방법이 재적재뿐이다.
