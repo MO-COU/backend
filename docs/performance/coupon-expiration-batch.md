@@ -31,7 +31,7 @@
 | 만료 시각과 같은 DB 시각의 사용 요청 | 사용 조건이 `expires_at > CURRENT_TIMESTAMP`이므로 사용 불가 |
 | 만료 이력 batch insert 실패 | 청크 트랜잭션 전체 롤백, 상태는 `ISSUED` 유지 |
 
-만료 후보를 먼저 조회한 뒤에도 `UPDATE ... WHERE status = 'ISSUED'` 결과가 1인 행만 `EXPIRED` 이력 batch insert에 포함한다. 따라서 경쟁에서 사용 전이가 승리한 행에는 만료 이력이 생성되지 않는다.
+만료 후보를 먼저 조회한 뒤에도 `UPDATE ... WHERE status = 'ISSUED'` 결과가 1 이상인 행만 `EXPIRED` 이력 batch insert에 포함한다. 드라이버가 건수 대신 `Statement.SUCCESS_NO_INFO`를 돌려주면 성공으로 본다. 따라서 경쟁에서 사용 전이가 승리한 행에는 만료 이력이 생성되지 않는다.
 
 ## 실행계획
 

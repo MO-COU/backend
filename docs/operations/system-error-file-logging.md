@@ -249,6 +249,6 @@ aws s3api get-bucket-lifecycle-configuration --bucket mocou-app-logs-2026
 
 재고 소진, 중복 발급, 발급 기간 전·후, 발급 준비 전·종료 후 같은 정상적인 발급 거절은 시스템 오류가 아니다. `SOLD_OUT`, `DUPLICATE_ISSUE`, `NOT_OPEN_YET`, `ISSUE_CLOSED`, `STOCK_NOT_INITIALIZED`, `METADATA_NOT_INITIALIZED`만으로 오류 파일을 기록하지 않는다.
 
-`issue_failure_log`는 Redis Stream → DB 동기화가 재시도 한도를 초과해 재고 보상까지 수행한 발급 건을 배치 담당자가 확인하는 데이터다. 이 테이블의 스키마와 저장 경로는 변경하지 않는다. 동일 사건의 상세 식별 정보는 이 경로에서 확인하고, 시스템 오류 파일에는 안전한 오류 메타데이터와 스택 프레임만 기록한다.
+`issue_failure_log`는 Redis Stream → DB 동기화가 메인 스트림 재시도 한도를 넘겨 DLQ로 넘어간 발급 건과, DLQ 복구까지 실패해 최종 포기한 발급 건을 담당자가 확인하는 데이터다. Redis 재고는 보상하지 않으며, 최종 실패 건은 관리자가 DLQ 실패 목록에서 확인한다. 이 테이블의 스키마와 저장 경로는 변경하지 않는다. 동일 사건의 상세 식별 정보는 이 경로에서 확인하고, 시스템 오류 파일에는 안전한 오류 메타데이터와 스택 프레임만 기록한다.
 
 시스템 오류 파일은 요청 본문, 토큰, 이메일, 원문 예외 메시지, 로그 메시지와 MDC를 기록하지 않는다. 대신 예외 유형과 스택 프레임을 남겨 발생 위치를 파악한다. API 요청 오류는 응답의 `traceId`로 기존 콘솔 로그를 연관해 확인한다.

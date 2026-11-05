@@ -79,7 +79,7 @@ Redis Stream Consumer와 정합성 검증 API는 `dev`에 통합됐다. 테스�
 5. B팀 정합성 검증을 실행하고 결과를 기록한다.
 6. 소규모 검증이 통과하면 요청량을 단계적으로 올린다.
 
-현재는 애플리케이션 연결만 확인하는 스모크 테스트를 실행할 수 있다.
+애플리케이션 연결만 확인할 때는 스모크 테스트를 실행한다.
 
 ```bash
 MODE=smoke VERIFY_DB=false VERIFY_REDIS=false \
