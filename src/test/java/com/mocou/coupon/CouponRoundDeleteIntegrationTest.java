@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
@@ -297,6 +298,22 @@ class CouponRoundDeleteIntegrationTest extends MySqlContainerTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS);
+
+        assertThat(countIssues(DEMO_COUPON_ID)).isEqualTo(ISSUED_IN_LOAD_TEST);
+    }
+
+    /** 미확인 건수를 0으로 넘기면 DB 삭제가 커밋된 뒤 컨슈머가 읽어 간 발급을 넣다가 FK 위반으로 멈춘다. */
+    @Test
+    @DisplayName("미확인 건수를 조회하지 못하면 지우지 않는다")
+    void rejectsWhenPendingCountCannotBeRead() {
+        // given - 그룹이 없다는 응답(NOGROUP)이 아닌 Redis 오류
+        String streamKey = CouponRedisKey.issueStream(DEMO_COUPON_ID);
+        redisTemplate.delete(streamKey);
+        redisTemplate.opsForValue().set(streamKey, "not-a-stream");
+
+        // when, then
+        assertThatThrownBy(() -> couponRoundService.delete(DEMO_COUPON_ID))
+                .isInstanceOf(RedisSystemException.class);
 
         assertThat(countIssues(DEMO_COUPON_ID)).isEqualTo(ISSUED_IN_LOAD_TEST);
     }

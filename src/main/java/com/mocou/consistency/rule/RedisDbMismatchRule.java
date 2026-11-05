@@ -15,7 +15,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -42,8 +41,8 @@ class RedisDbMismatchRule implements ConsistencyRule {
     /**
      * 컨슈머가 만드는 그룹 이름. 문자열을 옮겨 적지 않고 상수를 그대로 가리킨다.
      *
-     * <p>값을 복사해 두면 어긋나도 아무 데서도 걸리지 않는다. 없는 그룹을 조회하면 예외가 나고, 그것을 "그룹이 아직 없다"로
-     * 보는 아래 {@code catch}가 삼켜 미확인 건이 늘 0으로 나온다.
+     * <p>값을 복사해 두면 어긋나도 아무 데서도 걸리지 않는다. 없는 그룹을 조회하면 {@code NOGROUP}이 나고, 그것은
+     * "그룹이 아직 없다"로 처리되어 미확인 건이 늘 0으로 나온다.
      */
     private static final String SYNC_GROUP = RedisCouponIssueSyncGateway.GROUP_NAME;
 
@@ -65,6 +64,7 @@ class RedisDbMismatchRule implements ConsistencyRule {
             "SELECT remaining_quantity FROM coupon_stock WHERE coupon_id = :couponId";
 
     private final StringRedisTemplate redisTemplate;
+    private final RedisCouponIssueSyncGateway syncGateway;
 
     @Override
     public VerificationRule rule() {
@@ -122,7 +122,7 @@ class RedisDbMismatchRule implements ConsistencyRule {
                     .formatted(couponId, unprocessed);
         }
 
-        long unacknowledged = unacknowledgedCount(streamKey, SYNC_GROUP);
+        long unacknowledged = syncGateway.pendingCount(streamKey, SYNC_GROUP);
         if (unacknowledged > 0) {
             return "쿠폰 %d의 발급 이벤트 %d건이 컨슈머에서 처리 중이다. 동기화가 끝난 뒤 다시 검증해야 한다"
                     .formatted(couponId, unacknowledged);
@@ -137,22 +137,12 @@ class RedisDbMismatchRule implements ConsistencyRule {
             return "쿠폰 %d의 발급 이벤트 %d건이 DLQ에서 아직 복구를 시도하는 중이다. 복구가 끝난 뒤 다시 검증해야 한다"
                     .formatted(couponId, dlqUnprocessed);
         }
-        long dlqUnacknowledged = unacknowledgedCount(dlqStreamKey, DLQ_SYNC_GROUP);
+        long dlqUnacknowledged = syncGateway.pendingCount(dlqStreamKey, DLQ_SYNC_GROUP);
         if (dlqUnacknowledged > 0) {
             return "쿠폰 %d의 발급 이벤트 %d건이 DLQ 복구 컨슈머에서 처리 중이다. 복구가 끝난 뒤 다시 검증해야 한다"
                     .formatted(couponId, dlqUnacknowledged);
         }
         return null;
-    }
-
-    /** 컨슈머 그룹이 아직 없으면 미확인 건도 없다. 그 경우까지 실패로 보지 않는다. */
-    private long unacknowledgedCount(String streamKey, String groupName) {
-        try {
-            var pending = redisTemplate.opsForStream().pending(streamKey, groupName);
-            return pending == null ? 0 : pending.getTotalPendingMessages();
-        } catch (DataAccessException groupNotFound) {
-            return 0;
-        }
     }
 
     private Set<Long> redisIssuedMembers(long couponId) {

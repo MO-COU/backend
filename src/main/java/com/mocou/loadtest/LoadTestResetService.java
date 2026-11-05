@@ -3,7 +3,6 @@ package com.mocou.loadtest;
 import java.util.Objects;
 import java.util.Set;
 
-import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -91,7 +90,7 @@ public class LoadTestResetService {
      * 지울 수 없는 것</b>이다. 그대로 두면 리셋이 끝난 뒤 컨슈머가 DB에 넣어, 방금 지운 발급이 되살아난다.
      */
     private void rejectIfSyncInProgress(long couponId) {
-        long unacknowledged = unacknowledgedCount(
+        long unacknowledged = syncGateway.pendingCount(
                 CouponRedisKey.issueStream(couponId), RedisCouponIssueSyncGateway.GROUP_NAME);
         if (unacknowledged > 0) {
             throw new BusinessException(
@@ -101,22 +100,12 @@ public class LoadTestResetService {
 
         // DLQ로 넘어가 아직 복구 시도 중인 건도 "동기화 진행 중"이다 — 여기서 지우면
         // 복구가 성공했을 때 방금 지운 발급이 되살아난다.
-        long dlqUnacknowledged = unacknowledgedCount(
+        long dlqUnacknowledged = syncGateway.pendingCount(
                 CouponRedisKey.issueDlqStream(couponId), RedisCouponIssueSyncGateway.DLQ_GROUP_NAME);
         if (dlqUnacknowledged > 0) {
             throw new BusinessException(
                     ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS,
                     "DLQ에서 재시도 중인 발급 이벤트 %d건이 있다. 끝난 뒤 다시 요청해야 한다".formatted(dlqUnacknowledged));
-        }
-    }
-
-    /** 컨슈머 그룹이 아직 없으면 미확인 건도 없다. 부하 테스트를 한 번도 돌리지 않은 경우다. */
-    private long unacknowledgedCount(String streamKey, String groupName) {
-        try {
-            var pending = redisTemplate.opsForStream().pending(streamKey, groupName);
-            return pending == null ? 0 : pending.getTotalPendingMessages();
-        } catch (DataAccessException groupNotFound) {
-            return 0;
         }
     }
 

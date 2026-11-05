@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
@@ -216,6 +217,21 @@ class LoadTestResetIntegrationTest extends MySqlContainerTest {
         assertThat(redisTemplate.opsForStream().size(dlqStreamKey)).isZero();
         assertThat(redisTemplate.opsForStream().groups(dlqStreamKey))
                 .anyMatch(group -> RedisCouponIssueSyncGateway.DLQ_GROUP_NAME.equals(group.groupName()));
+    }
+
+    @Test
+    @DisplayName("미확인 건수를 조회하지 못하면 되돌리지 않는다")
+    void rejectsWhenPendingCountCannotBeRead() {
+        // given - 그룹이 없다는 응답(NOGROUP)이 아닌 Redis 오류
+        String streamKey = CouponRedisKey.issueStream(DEMO_COUPON_ID);
+        redisTemplate.delete(streamKey);
+        redisTemplate.opsForValue().set(streamKey, "not-a-stream");
+        long issuesBefore = count("SELECT COUNT(*) FROM coupon_issue");
+
+        // when, then
+        assertThatThrownBy(() -> resetService.reset(DEMO_COUPON_ID))
+                .isInstanceOf(RedisSystemException.class);
+        assertThat(count("SELECT COUNT(*) FROM coupon_issue")).isEqualTo(issuesBefore);
     }
 
     /**
