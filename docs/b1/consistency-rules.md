@@ -20,7 +20,7 @@ curl 'http://localhost:8080/api/admin/verifications/{runId}'
 
 | 항목 | 값 |
 | --- | --- |
-| 소요 | 300만 건 전량 약 **90초** (실행은 백그라운드, 응답은 즉시) |
+| 소요 | 300만 건 전량 약 **90초** (EC2 c5.2xlarge · InnoDB 버퍼 풀 4GB 기준. 실행은 백그라운드, 응답은 즉시) |
 | 대상 | 발급 이력 **300만 건 전체**. 표본·최근 N건 검사는 하지 않는다 |
 | 규칙 수 | **9종** (`R1`~`R9`). 이 중 `R7`은 검출력 증명이라 실행 목록에는 8종이 오른다 |
 | 판정 | `PASS` / `FAIL` / **`ERROR`**(판정 불가) |
@@ -250,7 +250,8 @@ G = mocou.lifecycle.expiration.fixed-delay-ms × 5
 <summary><b>판정 쿼리와 주의점</b></summary>
 
 ```sql
-SELECT i.coupon_issue_id,
+SELECT /*+ NO_INDEX(i idx_issue_member) NO_INDEX(m PRIMARY) */
+       i.coupon_issue_id,
        CONCAT_WS(',',
          CASE WHEN i.status = 'USED' AND i.used_at IS NULL THEN 'USED_WITHOUT_TIMESTAMP' END,
          CASE WHEN i.status <> 'USED' AND i.used_at IS NOT NULL THEN 'UNUSED_WITH_TIMESTAMP' END,
@@ -275,7 +276,7 @@ WHERE (i.status = 'USED' AND i.used_at IS NULL)
 
 - `CONCAT_WS`는 `NULL` 인자를 건너뛰므로, 조건에 걸리지 않은 항목은 자동으로 빠진다.
 - **필터는 `WHERE`에 쓴다.** `SELECT` 별칭에 `HAVING`을 걸면 `GROUP BY`가 없어 전체가 한 그룹으로 묶이고 **최대 1행만 반환된다.**
-- `ISSUED_BEFORE_SIGNUP`은 300만 행 각각에 `member` PK 조회가 발생한다. 비용이 크면 이 항목만 별도 쿼리로 분리한다.
+- **`member` 조인은 힌트로 hash join을 쓴다.** 조인용 인덱스를 막지 않으면 옵티마이저가 Nested Loop를 골라, 회원 100만을 훑으며 `idx_issue_member`로 발급 300만 건을 랜덤 접근한다. `OR` 조건이 두 테이블에 걸쳐 있어 양쪽 풀스캔이 불가피하므로 hash join이 항상 낫다. 힌트는 인덱스 이름이 바뀌어도 경고만 내고 무시되어 쿼리가 죽지 않는다. 판단 근거는 [#204](https://github.com/MO-COU/backend/pull/204)에 있다.
 
 </details>
 
@@ -359,7 +360,7 @@ WHERE prev.to_status <> h.from_status
 
 - **정렬에 `history_id`를 함께 넣는다.** `changed_at`이 같은 이력이 있을 때 순서가 흔들리면 판정이 실행마다 달라진다. `BROKEN_CHAIN`의 `LATERAL` 안쪽 비교식이 복잡한 것도 같은 이유다 — "직전 한 건"을 `(changed_at, history_id)` 사전순으로 못 박아야 결과가 결정적이다.
 - **`MISSING_INITIAL_HISTORY`는 건수와 상세의 식이 다르다.** 건수는 조인 없이 산수로 세고, 상세는 어느 발급 건인지 지목해야 해서 `LEFT JOIN`을 쓴다. 둘이 같은 기준임은 `HistoryChainQueryEquivalenceIntegrationTest`가 원안 건수식을 대조군으로 두고 못 박는다([#208](https://github.com/MO-COU/backend/pull/208)).
-- **`BROKEN_CHAIN`은 윈도우 함수를 쓰지 않는다.** `LAG`로 쓰면 파티션 전체를 버퍼링해 600만 행을 한 번에 물어야 한다. `LATERAL`은 이력 한 줄마다 직전 한 건만 집어오므로 정렬이 사라진다. 판단 근거는 [#173](https://github.com/MO-COU/backend/pull/173)에 있다.
+- **`BROKEN_CHAIN`은 윈도우 함수를 쓰지 않는다.** `LAG`로 쓰면 파티션 전체를 버퍼링해 600만 행을 한 번에 물어야 한다. `LATERAL`은 이력 한 줄마다 직전 한 건만 집어오므로 전체 버퍼링이 없고, 남는 정렬은 발급 건마다 2행짜리다. 판단 근거는 [#173](https://github.com/MO-COU/backend/pull/173)에 있다.
 
 </details>
 
