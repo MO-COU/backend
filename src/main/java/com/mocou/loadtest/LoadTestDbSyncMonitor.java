@@ -6,7 +6,6 @@ import java.time.Duration;
 import java.time.Instant;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -20,14 +19,17 @@ public class LoadTestDbSyncMonitor {
 
     private final JdbcTemplate jdbcTemplate;
     private final StringRedisTemplate redisTemplate;
+    private final RedisCouponIssueSyncGateway syncGateway;
     private final Duration timeout;
 
     public LoadTestDbSyncMonitor(
             JdbcTemplate jdbcTemplate,
             StringRedisTemplate redisTemplate,
+            RedisCouponIssueSyncGateway syncGateway,
             @Value("${mocou.loadtest.db-sync.timeout-seconds:60}") long timeoutSeconds) {
         this.jdbcTemplate = jdbcTemplate;
         this.redisTemplate = redisTemplate;
+        this.syncGateway = syncGateway;
         this.timeout = Duration.ofSeconds(timeoutSeconds);
     }
 
@@ -74,20 +76,7 @@ public class LoadTestDbSyncMonitor {
         return new SyncState(
                 dbIssuedCount == null ? 0 : dbIssuedCount,
                 streamSize == null ? 0 : streamSize,
-                pendingCount(streamKey));
-    }
-
-    /** 그룹이 없으면 처리 중인 이벤트도 없음. */
-    private long pendingCount(String streamKey) {
-        try {
-            var pending =
-                    redisTemplate
-                            .opsForStream()
-                            .pending(streamKey, RedisCouponIssueSyncGateway.GROUP_NAME);
-            return pending == null ? 0 : pending.getTotalPendingMessages();
-        } catch (DataAccessException groupNotFound) {
-            return 0;
-        }
+                syncGateway.pendingCount(streamKey, RedisCouponIssueSyncGateway.GROUP_NAME));
     }
 
     private record SyncState(long dbIssuedCount, long streamSize, long pendingCount) {

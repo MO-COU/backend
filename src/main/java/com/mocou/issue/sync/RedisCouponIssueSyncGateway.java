@@ -1,6 +1,7 @@
 package com.mocou.issue.sync;
 
 import org.springframework.data.redis.RedisSystemException;
+import org.springframework.data.redis.connection.stream.PendingMessagesSummary;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,7 @@ public class RedisCouponIssueSyncGateway {
     public static final String DLQ_GROUP_NAME = "coupon-issue-dlq-recovery";
 
     private static final String BUSY_GROUP_ERROR = "BUSYGROUP";
+    private static final String NO_GROUP_ERROR = "NOGROUP";
 
     private final StringRedisTemplate redisTemplate;
 
@@ -41,6 +43,22 @@ public class RedisCouponIssueSyncGateway {
      */
     public CouponIssueSyncGroupResult ensureDlqConsumerGroup(long couponId) {
         return ensureGroup(CouponRedisKey.issueDlqStream(couponId), DLQ_GROUP_NAME);
+    }
+
+    /**
+     * 그룹이 읽어 갔지만 아직 ACK하지 않은 이벤트 수. 그룹이 없으면 읽어 간 이벤트도 없으므로 0이다.
+     * 그 밖의 Redis 오류는 0으로 바꾸지 않고 던진다.
+     */
+    public long pendingCount(String streamKey, String groupName) {
+        try {
+            PendingMessagesSummary summary = redisTemplate.opsForStream().pending(streamKey, groupName);
+            return summary == null ? 0 : summary.getTotalPendingMessages();
+        } catch (RedisSystemException e) {
+            if (isNoGroupError(e)) {
+                return 0;
+            }
+            throw e;
+        }
     }
 
     private CouponIssueSyncGroupResult ensureGroup(String streamKey, String groupName) {
@@ -65,5 +83,12 @@ public class RedisCouponIssueSyncGateway {
 
         return cause.getMessage() != null
                 && cause.getMessage().contains(BUSY_GROUP_ERROR);
+    }
+
+    private boolean isNoGroupError(RedisSystemException e) {
+        Throwable cause = e.getMostSpecificCause();
+
+        return cause.getMessage() != null
+                && cause.getMessage().contains(NO_GROUP_ERROR);
     }
 }

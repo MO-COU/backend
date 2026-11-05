@@ -14,7 +14,6 @@ import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -42,6 +41,7 @@ public class CouponRoundService {
     private final StringRedisTemplate redisTemplate;
     private final LoadTestRunRepository loadTestRunRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final RedisCouponIssueSyncGateway syncGateway;
 
     /**
      * 회차를 만들고 발급 가능한 상태로 둔다.
@@ -171,7 +171,7 @@ public class CouponRoundService {
      */
     private void rejectIfSyncInProgress(long couponId) {
         long unacknowledged =
-                unacknowledgedCount(
+                syncGateway.pendingCount(
                         CouponRedisKey.issueStream(couponId),
                         RedisCouponIssueSyncGateway.GROUP_NAME);
         if (unacknowledged > 0) {
@@ -181,7 +181,7 @@ public class CouponRoundService {
         }
 
         long dlqUnacknowledged =
-                unacknowledgedCount(
+                syncGateway.pendingCount(
                         CouponRedisKey.issueDlqStream(couponId),
                         RedisCouponIssueSyncGateway.DLQ_GROUP_NAME);
         if (dlqUnacknowledged > 0) {
@@ -189,16 +189,6 @@ public class CouponRoundService {
                     ErrorCode.LOAD_TEST_SYNC_IN_PROGRESS,
                     "DLQ에서 재시도 중인 발급 이벤트 %d건이 있다. 끝난 뒤 다시 요청해야 한다"
                             .formatted(dlqUnacknowledged));
-        }
-    }
-
-    /** 컨슈머 그룹이 아직 없으면 미확인 건도 없다. 부하 테스트를 한 번도 돌리지 않은 회차다. */
-    private long unacknowledgedCount(String streamKey, String groupName) {
-        try {
-            var pending = redisTemplate.opsForStream().pending(streamKey, groupName);
-            return pending == null ? 0 : pending.getTotalPendingMessages();
-        } catch (DataAccessException groupNotFound) {
-            return 0;
         }
     }
 

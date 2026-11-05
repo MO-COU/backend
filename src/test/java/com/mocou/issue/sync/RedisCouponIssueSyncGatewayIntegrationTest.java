@@ -5,9 +5,14 @@ import java.util.Map;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.RedisSystemException;
+import org.springframework.data.redis.connection.stream.Consumer;
+import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.StreamInfo;
+import org.springframework.data.redis.connection.stream.StreamOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RedisCouponIssueSyncGatewayIntegrationTest
         extends RedisCouponIssueSyncIntegrationTestSupport {
@@ -110,6 +115,66 @@ class RedisCouponIssueSyncGatewayIntegrationTest
         // then
         assertThat(groupNames()).containsExactly(RedisCouponIssueSyncGateway.GROUP_NAME);
         assertThat(dlqGroupNames()).containsExactly(RedisCouponIssueSyncGateway.DLQ_GROUP_NAME);
+    }
+
+    @Test
+    @DisplayName("Stream이 없으면 미확인 건수는 0이다")
+    void pendingCountIsZeroWhenStreamMissing() {
+        // when
+        long pending = gateway.pendingCount(
+                issueStreamKey(), RedisCouponIssueSyncGateway.GROUP_NAME);
+
+        // then
+        assertThat(pending).isZero();
+    }
+
+    @Test
+    @DisplayName("Consumer Group이 없으면 미확인 건수는 0이다")
+    void pendingCountIsZeroWhenGroupMissing() {
+        // given
+        redisTemplate.opsForStream().add(
+                issueStreamKey(),
+                Map.of("eventId", "existing-event"));
+
+        // when
+        long pending = gateway.pendingCount(
+                issueStreamKey(), RedisCouponIssueSyncGateway.GROUP_NAME);
+
+        // then
+        assertThat(pending).isZero();
+    }
+
+    @Test
+    @DisplayName("그룹이 읽고 ACK하지 않은 이벤트 수를 센다")
+    void countsUnacknowledgedEvents() {
+        // given
+        redisTemplate.opsForStream().add(issueStreamKey(), Map.of("eventId", "event-1"));
+        redisTemplate.opsForStream().add(issueStreamKey(), Map.of("eventId", "event-2"));
+        gateway.ensureConsumerGroup(COUPON_ID);
+        redisTemplate.opsForStream().read(
+                Consumer.from(RedisCouponIssueSyncGateway.GROUP_NAME, "test-consumer"),
+                StreamOffset.create(issueStreamKey(), ReadOffset.lastConsumed()));
+
+        // when
+        long pending = gateway.pendingCount(
+                issueStreamKey(), RedisCouponIssueSyncGateway.GROUP_NAME);
+
+        // then
+        assertThat(pending).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("그룹이 없다는 오류가 아니면 0으로 바꾸지 않고 던진다")
+    void rethrowsRedisErrorsOtherThanNoGroup() {
+        // given
+        redisTemplate.opsForValue().set(issueStreamKey(), "not-a-stream");
+
+        // when, then
+        assertThatThrownBy(() -> gateway.pendingCount(
+                issueStreamKey(), RedisCouponIssueSyncGateway.GROUP_NAME))
+                .isInstanceOf(RedisSystemException.class)
+                .rootCause()
+                .hasMessageContaining("WRONGTYPE");
     }
 
     private List<String> groupNames() {
