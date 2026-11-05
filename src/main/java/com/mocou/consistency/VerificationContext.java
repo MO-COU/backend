@@ -11,13 +11,22 @@ import java.time.LocalDateTime;
  * @param graceSeconds 만료 지연 유예. 만료 배치 주기에서 파생되는 값이라 상수가 아니다
  * @param violationLimit 규칙당 저장할 위반 상세의 최대 건수
  * @param countCache 실행 1회 동안 테이블 건수 조회를 재사용하는 캐시. 컨텍스트와 수명을 같이한다
+ * @param redisSyncBaseline 스냅샷을 열기 직전의 Redis 동기화 상태. Redis와 DB를 대조하는 규칙만 쓴다
  */
 public record VerificationContext(
-        LocalDateTime snapshotAt, long graceSeconds, int violationLimit, CountCache countCache) {
+        LocalDateTime snapshotAt,
+        long graceSeconds,
+        int violationLimit,
+        CountCache countCache,
+        RedisSyncBaseline redisSyncBaseline) {
 
     /** 실행마다 새 캐시를 함께 만든다. 기존 호출부는 이 생성자를 그대로 쓴다. */
     public VerificationContext(LocalDateTime snapshotAt, long graceSeconds, int violationLimit) {
-        this(snapshotAt, graceSeconds, violationLimit, new CountCache());
+        this(snapshotAt, graceSeconds, violationLimit, new CountCache(), RedisSyncBaseline.notCaptured());
+    }
+
+    public VerificationContext withRedisSyncBaseline(RedisSyncBaseline baseline) {
+        return new VerificationContext(snapshotAt, graceSeconds, violationLimit, countCache, baseline);
     }
 
     public VerificationContext {
@@ -34,6 +43,9 @@ public record VerificationContext(
         }
         if (countCache == null) {
             throw new IllegalArgumentException("건수 캐시는 필수다");
+        }
+        if (redisSyncBaseline == null) {
+            throw new IllegalArgumentException("Redis 동기화 기준값은 필수다. 기록하지 않았으면 notCaptured()를 쓴다");
         }
     }
 }

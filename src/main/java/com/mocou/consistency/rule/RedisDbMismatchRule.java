@@ -1,17 +1,19 @@
 package com.mocou.consistency.rule;
 
 import com.mocou.consistency.ConsistencyRule;
+import com.mocou.consistency.RedisSyncBaseline;
+import com.mocou.consistency.RedisSyncBaselineReader;
 import com.mocou.consistency.RuleOutcome;
 import com.mocou.consistency.VerificationContext;
 import com.mocou.consistency.VerificationRule;
 import com.mocou.consistency.Violation;
 import com.mocou.consistency.ViolationTarget;
 import com.mocou.issue.CouponRedisKey;
-import com.mocou.issue.sync.RedisCouponIssueSyncGateway;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import lombok.RequiredArgsConstructor;
@@ -31,23 +33,15 @@ import org.springframework.stereotype.Component;
  * <p>둘째, 비동기라 지연이 정상이다. 발급 중에는 늘 차이가 있으므로 규칙이 정상 지연과 실제 유실을 가릴 수 없다.
  *
  * <p>동기화가 끝나야 "Redis와 DB는 같아야 한다"는 단정이 성립한다. 그 상태인지는 사람에게 묻지 않고 스트림에서 직접 확인한다.
- * 컨슈머가 DB 커밋 뒤 {@code XACK}과 {@code XDEL}을 함께 하므로, 남은 엔트리와 미확인 건이 모두 0이면 처리가 끝난 것이다.
  * 끝나지 않았으면 위반 0건이 아니라 <b>판정 불가</b>로 남긴다.
+ *
+ * <p>확인하는 시점은 둘이다. 스냅샷을 열기 전에 동기화가 끝나 있어야 그때까지의 발급이 모두 스냅샷에 있고, Redis를 다 읽을
+ * 때까지 발급 순번이 그대로여야 읽는 동안 새 발급이 없었다. 이 규칙이 돌 때만 확인하면 스냅샷을 연 뒤에 끝난 동기화를 "끝났다"로
+ * 읽어, 스냅샷에 없는 정상 발급을 유실로 판정한다.
  */
 @Component
 @RequiredArgsConstructor
 class RedisDbMismatchRule implements ConsistencyRule {
-
-    /**
-     * 컨슈머가 만드는 그룹 이름. 문자열을 옮겨 적지 않고 상수를 그대로 가리킨다.
-     *
-     * <p>값을 복사해 두면 어긋나도 아무 데서도 걸리지 않는다. 없는 그룹을 조회하면 {@code NOGROUP}이 나고, 그것은
-     * "그룹이 아직 없다"로 처리되어 미확인 건이 늘 0으로 나온다.
-     */
-    private static final String SYNC_GROUP = RedisCouponIssueSyncGateway.GROUP_NAME;
-
-    /** DLQ 복구 컨슈머가 만드는 그룹 이름. 이유는 위와 같다. */
-    private static final String DLQ_SYNC_GROUP = RedisCouponIssueSyncGateway.DLQ_GROUP_NAME;
 
     /**
      * 검사 대상 쿠폰. Redis 키는 발급을 여는 쿠폰에만 만들어지므로 DB에서 그 목록을 가져온다.
@@ -64,7 +58,7 @@ class RedisDbMismatchRule implements ConsistencyRule {
             "SELECT remaining_quantity FROM coupon_stock WHERE coupon_id = :couponId";
 
     private final StringRedisTemplate redisTemplate;
-    private final RedisCouponIssueSyncGateway syncGateway;
+    private final RedisSyncBaselineReader syncReader;
 
     @Override
     public VerificationRule rule() {
@@ -82,8 +76,13 @@ class RedisDbMismatchRule implements ConsistencyRule {
         long violationCount = 0;
         List<Violation> violations = new ArrayList<>();
 
+        RedisSyncBaseline baseline = context.redisSyncBaseline();
         for (long couponId : couponIds) {
-            String pending = pendingSyncDescription(couponId);
+            String notReady = baseline.notReadyReason(couponId);
+            if (notReady != null) {
+                return RuleOutcome.failed(rule(), notReady);
+            }
+            String pending = syncReader.pendingDescription(couponId);
             if (pending != null) {
                 return RuleOutcome.failed(rule(), pending);
             }
@@ -101,48 +100,21 @@ class RedisDbMismatchRule implements ConsistencyRule {
             violationCount +=
                     collectMemberGaps(couponId, redisMembers, dbMembers, context, violations);
             violationCount += collectStockGap(jdbcTemplate, couponId, context, violations);
+
+            String sequenceAtStart = baseline.issueSequence(couponId);
+            String sequenceNow = syncReader.issueSequence(couponId);
+            if (!Objects.equals(sequenceAtStart, sequenceNow)) {
+                return RuleOutcome.failed(
+                        rule(),
+                        "쿠폰 %d의 발급이 검증 도중 진행됐다 (순번 %s → %s). 발급이 멈춘 뒤 다시 검증해야 한다"
+                                .formatted(couponId, orNone(sequenceAtStart), orNone(sequenceNow)));
+            }
         }
 
         if (violationCount == 0) {
             return RuleOutcome.passed(rule(), checkedCount);
         }
         return RuleOutcome.violated(rule(), checkedCount, violationCount, violations);
-    }
-
-    /**
-     * 아직 DB로 넘어가지 않은 발급이 남아 있는지 본다.
-     *
-     * @return 남아 있으면 사유, 없으면 {@code null}
-     */
-    private String pendingSyncDescription(long couponId) {
-        String streamKey = CouponRedisKey.issueStream(couponId);
-        Long unprocessed = redisTemplate.opsForStream().size(streamKey);
-        if (unprocessed != null && unprocessed > 0) {
-            return "쿠폰 %d의 발급 이벤트 %d건이 아직 DB로 동기화되지 않았다. 동기화가 끝난 뒤 다시 검증해야 한다"
-                    .formatted(couponId, unprocessed);
-        }
-
-        long unacknowledged = syncGateway.pendingCount(streamKey, SYNC_GROUP);
-        if (unacknowledged > 0) {
-            return "쿠폰 %d의 발급 이벤트 %d건이 컨슈머에서 처리 중이다. 동기화가 끝난 뒤 다시 검증해야 한다"
-                    .formatted(couponId, unacknowledged);
-        }
-
-        // 메인 스트림이 비었어도 DLQ에서 아직 복구를 시도하는 중일 수 있다. 이 상태를 놓치면
-        // Redis(issuedMembers)엔 있는데 DB(coupon_issue)엔 아직 없는 정상적인 지연을
-        // "유실"로 오판(ISSUED_ONLY_IN_REDIS)한다.
-        String dlqStreamKey = CouponRedisKey.issueDlqStream(couponId);
-        Long dlqUnprocessed = redisTemplate.opsForStream().size(dlqStreamKey);
-        if (dlqUnprocessed != null && dlqUnprocessed > 0) {
-            return "쿠폰 %d의 발급 이벤트 %d건이 DLQ에서 아직 복구를 시도하는 중이다. 복구가 끝난 뒤 다시 검증해야 한다"
-                    .formatted(couponId, dlqUnprocessed);
-        }
-        long dlqUnacknowledged = syncGateway.pendingCount(dlqStreamKey, DLQ_SYNC_GROUP);
-        if (dlqUnacknowledged > 0) {
-            return "쿠폰 %d의 발급 이벤트 %d건이 DLQ 복구 컨슈머에서 처리 중이다. 복구가 끝난 뒤 다시 검증해야 한다"
-                    .formatted(couponId, dlqUnacknowledged);
-        }
-        return null;
     }
 
     private Set<Long> redisIssuedMembers(long couponId) {
@@ -197,6 +169,10 @@ class RedisDbMismatchRule implements ConsistencyRule {
                             memberId,
                             "%s: 쿠폰 %d 회원 %d".formatted(code, couponId, memberId)));
         }
+    }
+
+    private static String orNone(String value) {
+        return value == null ? "없음" : value;
     }
 
     /** Redis 재고와 DB 잔여 재고를 맞춰본다. 키가 없으면 초기화 전이거나 유실이므로 위반이다. */
