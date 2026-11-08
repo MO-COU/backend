@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 700" width="1260" height="700" font-family="Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+    <style>
+      .box{fill:#ffffff;stroke:#d0d7de;stroke-width:1.5}
+      .aws{fill:#fffaf2;stroke:#f2c48d;stroke-width:1.5;stroke-dasharray:8 6}
+      .ec2{fill:#f6f8fa;stroke:#d0d7de;stroke-width:1.5}
+      .compose{fill:#eef6ff;stroke:#b6d4f2;stroke-width:1.5}
+      .t{font-size:17px;font-weight:700;fill:#1f2328}
+      .s{font-size:13px;fill:#57606a}
+      .g{font-size:14px;font-weight:700;fill:#57606a}
+      .ga{font-size:14px;font-weight:700;fill:#b25e00}
+      .gc{font-size:14px;font-weight:700;fill:#1f6feb}
+      .l{font-size:12.5px;fill:#57606a}
+      .ln{stroke:#57606a;stroke-width:1.8;fill:none}
+    </style>
+  </defs>
+  <rect width="1260" height="700" rx="16" fill="#ffffff"/>
+
+  <!-- 외부 -->
+  <rect class="box" x="650" y="20" width="200" height="80" rx="10"/>
+  <rect x="650" y="20" width="6" height="80" rx="3" fill="#8c959f"/>
+  <text class="t" x="672" y="54">GHCR</text>
+  <text class="s" x="672" y="78">backend 이미지</text>
+
+  <rect class="box" x="1000" y="20" width="210" height="80" rx="10"/>
+  <rect x="1000" y="20" width="6" height="80" rx="3" fill="#2088ff"/>
+  <text class="t" x="1022" y="54">GitHub Actions</text>
+  <text class="s" x="1022" y="78">CI 빌드·테스트 · CD 배포</text>
+
+  <rect class="box" x="30" y="215" width="210" height="80" rx="10"/>
+  <rect x="30" y="215" width="6" height="80" rx="3" fill="#8c959f"/>
+  <text class="t" x="52" y="249">브라우저</text>
+  <text class="s" x="52" y="273">고객 · 관리자 화면</text>
+
+  <!-- AWS -->
+
+  <!-- 앱 EC2 -->
+  <rect class="ec2" x="330" y="170" width="530" height="490" rx="14"/>
+  <text class="g" x="350" y="196">앱 EC2</text>
+
+  <rect class="box" x="360" y="215" width="240" height="80" rx="10"/>
+  <rect x="360" y="215" width="6" height="80" rx="3" fill="#009639"/>
+  <text class="t" x="382" y="249">NGINX :80</text>
+  <text class="s" x="382" y="273">프론트 정적 파일 · /api 프록시</text>
+
+  <rect class="compose" x="360" y="340" width="470" height="300" rx="12"/>
+  <text class="gc" x="380" y="366">Docker Compose</text>
+
+  <rect class="box" x="390" y="380" width="410" height="80" rx="10"/>
+  <rect x="390" y="380" width="6" height="80" rx="3" fill="#6db33f"/>
+  <text class="t" x="412" y="414">Spring Boot :8080</text>
+  <text class="s" x="412" y="438">발급 API · Stream 컨슈머 · 관리자 API · 배치</text>
+
+  <rect class="box" x="390" y="530" width="190" height="80" rx="10"/>
+  <rect x="390" y="530" width="6" height="80" rx="3" fill="#4479a1"/>
+  <text class="t" x="412" y="564">MySQL</text>
+  <text class="s" x="412" y="588">발급 · 이력 · Outbox</text>
+
+  <rect class="box" x="610" y="530" width="190" height="80" rx="10"/>
+  <rect x="610" y="530" width="6" height="80" rx="3" fill="#dc382d"/>
+  <text class="t" x="632" y="564">Redis</text>
+  <text class="s" x="632" y="588">재고 · Stream · AOF</text>
+
+  <!-- 오른쪽 열 -->
+  <rect class="box" x="1000" y="170" width="210" height="80" rx="10"/>
+  <rect x="1000" y="170" width="6" height="80" rx="3" fill="#e7157b"/>
+  <text class="t" x="1022" y="204">Systems Manager</text>
+  <text class="s" x="1022" y="228">Run Command</text>
+
+  <rect class="ec2" x="1000" y="320" width="210" height="180" rx="14"/>
+  <text class="g" x="1020" y="346">k6 EC2</text>
+  <rect class="box" x="1025" y="370" width="160" height="80" rx="10"/>
+  <rect x="1025" y="370" width="6" height="80" rx="3" fill="#7d64ff"/>
+  <text class="t" x="1047" y="404">k6</text>
+  <text class="s" x="1047" y="428">부하 테스트 전용</text>
+
+  <rect class="box" x="1000" y="570" width="210" height="80" rx="10"/>
+  <rect x="1000" y="570" width="6" height="80" rx="3" fill="#569a31"/>
+  <text class="t" x="1022" y="604">S3</text>
+  <text class="s" x="1022" y="628">ERROR 로그 · 90일 보관</text>
+
+  <!-- 연결 -->
+  <line class="ln" x1="1000" y1="60" x2="852" y2="60" marker-end="url(#a)"/>
+  <text class="l" x="926" y="50" text-anchor="middle">이미지 푸시</text>
+
+  <line class="ln" x1="750" y1="100" x2="750" y2="168" marker-end="url(#a)"/>
+  <text class="l" x="760" y="118">이미지 pull</text>
+
+  <line class="ln" x1="1105" y1="100" x2="1105" y2="168" marker-end="url(#a)"/>
+  <text class="l" x="1115" y="118">배포 명령</text>
+
+  <line class="ln" x1="1000" y1="210" x2="862" y2="210" marker-end="url(#a)"/>
+  <text class="l" x="930" y="200" text-anchor="middle">배포</text>
+
+  <line class="ln" x1="1105" y1="250" x2="1105" y2="318" marker-end="url(#a)"/>
+  <text class="l" x="1115" y="290">k6 실행</text>
+
+  <polyline class="ln" points="860,400 900,400 900,235 998,235" marker-end="url(#a)"/>
+  <text class="l" x="910" y="322">실행 요청</text>
+
+  <line class="ln" x1="1000" y1="440" x2="862" y2="440" marker-end="url(#a)"/>
+  <text class="l" x="930" y="432" text-anchor="middle">발급 요청</text>
+
+  <line class="ln" x1="860" y1="610" x2="998" y2="610" marker-end="url(#a)"/>
+  <text class="l" x="930" y="600" text-anchor="middle">로그 백업</text>
+
+  <line class="ln" x1="240" y1="255" x2="328" y2="255" marker-end="url(#a)"/>
+  <text class="l" x="284" y="245" text-anchor="middle">HTTP :80</text>
+
+  <line class="ln" x1="560" y1="295" x2="560" y2="338" marker-end="url(#a)"/>
+  <text class="l" x="570" y="322">/api</text>
+
+  <line class="ln" x1="485" y1="460" x2="485" y2="528" marker-end="url(#a)"/>
+  <line class="ln" x1="705" y1="460" x2="705" y2="528" marker-end="url(#a)"/>
+</svg>
