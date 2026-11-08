@@ -90,8 +90,8 @@ DB 발급 수 + DB 잔여 재고 = 총 재고
 Redis 발급 회원 = DB 발급 회원, Redis 재고 = DB 잔여 재고
 ```
 
-- 전체 검증 시간은 EC2(c5.2xlarge)에서 180초였고, 쿼리 3건 개선([#209](https://github.com/MO-COU/backend/pull/209))과 MySQL 버퍼 풀 4GB 산정([#210](https://github.com/MO-COU/backend/issues/210))으로 90초가 됐다.
-- 같은 앱 EC2에 k6로 20,000 VU를 60초에 걸쳐 늘리면 p95 약 2.0초였고 DB 적재는 k6 종료와 함께 끝났다([#168](https://github.com/MO-COU/backend/issues/168#issuecomment-5467609099)). 한꺼번에 몰리는 조건은 6회 모두 오류 0건, p95 약 1.2초였다([#218](https://github.com/MO-COU/backend/issues/218)).
+- 전체 검증 시간은 EC2(c5.2xlarge)에서 180초였고, [쿼리 3건 개선](https://github.com/MO-COU/backend/pull/209)과 [MySQL 버퍼 풀 4GB 산정](https://github.com/MO-COU/backend/issues/210)으로 90초가 됐다.
+- 같은 앱 EC2에 k6로 20,000 VU를 60초에 걸쳐 늘리면 p95 약 2.0초였고 DB 적재는 k6 종료와 함께 끝났다([측정 기록](https://github.com/MO-COU/backend/issues/168#issuecomment-5467609099)). 한꺼번에 몰리는 조건은 6회 모두 오류 0건이었고, 워커 스레드 200에서 p95는 약 1.2초였다([측정 기록](https://github.com/MO-COU/backend/issues/218)).
 
 ## 추가 기능
 
@@ -148,11 +148,11 @@ API 문서: http://localhost:8080/swagger-ui/index.html
 
 ## 팀원
 
-| 이름 | 담당 |
+| 이름 | 주요 담당 |
 |---|---|
-| 장근창 (팀장) | 대용량 데이터 생성, Redis·DB 정합성 검증과 검증 쿼리 튜닝, 동시성 제어 비교 실험 설계·측정([load-test](https://github.com/MO-COU/load-test)) |
+| 장근창 (팀장) | 대용량 데이터 생성, Redis-DB 정합성 검증과 검증 쿼리 튜닝, 동시성 제어 비교 실험 설계·측정 |
 | 권도하 | 공통 기능 및 배포·운영 환경 |
 | 권혁준 | 쿠폰 생명주기, 만료 Batch, Redis 발급 현황, 운영 로그 및 S3 백업 |
-| 박서희 | 관리자 API, k6 부하 테스트 및 AWS SSM 자동 실행 |
+| 박서희 | 관리자 API, k6 부하 테스트 및 AWS SSM 기반 실행 |
 | 조현빈 | Redis Stream Consumer, 재처리·DLQ, Transactional Outbox |
-| 지창민 | Redis Lua 발급, 재고·중복 제어, 발급 순번 및 Redis 상태 관리 |
+| 지창민 | Redis Lua 기반 발급, 재고·중복 제어, 발급 순번 및 Redis 상태 관리 |
