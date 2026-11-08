@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" font-family="Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+    <style>
+      .box{fill:#ffffff;stroke:#d0d7de;stroke-width:1.5}
+      .group{fill:#fff5f4;stroke:#f0b8b3;stroke-width:1.5}
+      .t{font-size:17px;font-weight:700;fill:#1f2328}
+      .s{font-size:13px;fill:#57606a}
+      .g{font-size:14px;font-weight:700;fill:#b42318}
+      .l{font-size:12.5px;fill:#57606a}
+      .sync{stroke:#57606a;stroke-width:1.8;fill:none}
+      .async{stroke:#57606a;stroke-width:1.8;fill:none;stroke-dasharray:6 5}
+    </style>
+  </defs>
+  <rect width="1200" height="640" rx="16" fill="#ffffff"/>
+
+  <!-- 요청 경로 -->
+  <rect class="box" x="40" y="60" width="170" height="80" rx="10"/>
+  <rect x="40" y="60" width="6" height="80" rx="3" fill="#8c959f"/>
+  <text class="t" x="62" y="94">브라우저</text>
+  <text class="s" x="62" y="118">고객 · 관리자 화면</text>
+
+  <rect class="box" x="270" y="60" width="170" height="80" rx="10"/>
+  <rect x="270" y="60" width="6" height="80" rx="3" fill="#009639"/>
+  <text class="t" x="292" y="94">NGINX</text>
+  <text class="s" x="292" y="118">/api 요청 프록시</text>
+
+  <rect class="box" x="500" y="60" width="200" height="80" rx="10"/>
+  <rect x="500" y="60" width="6" height="80" rx="3" fill="#6db33f"/>
+  <text class="t" x="522" y="94">발급 API</text>
+  <text class="s" x="522" y="118">Spring Boot · 예약 즉시 202</text>
+
+  <line class="sync" x1="210" y1="100" x2="268" y2="100" marker-end="url(#a)"/>
+  <line class="sync" x1="440" y1="100" x2="498" y2="100" marker-end="url(#a)"/>
+
+  <!-- Redis -->
+  <text class="g" x="790" y="44">Redis 8.8</text>
+  <text class="l" x="1130" y="44" text-anchor="end">AOF appendfsync always</text>
+
+  <rect class="box" x="790" y="60" width="340" height="80" rx="10"/>
+  <rect x="790" y="60" width="6" height="80" rx="3" fill="#dc382d"/>
+  <text class="t" x="812" y="94">Lua 스크립트 (원자 처리)</text>
+  <text class="s" x="812" y="118">오픈 시각 · 중복 · 재고 확인 → 차감 → 이벤트 기록</text>
+
+  <rect class="box" x="790" y="180" width="160" height="64" rx="10"/>
+  <rect x="790" y="180" width="6" height="64" rx="3" fill="#dc382d"/>
+  <text class="t" x="810" y="208" style="font-size:15px">재고 · 발급 회원</text>
+  <text class="s" x="810" y="230">String · Sorted Set</text>
+
+  <rect class="box" x="970" y="180" width="160" height="64" rx="10"/>
+  <rect x="970" y="180" width="6" height="64" rx="3" fill="#dc382d"/>
+  <text class="t" x="990" y="208" style="font-size:15px">발급 Stream</text>
+  <text class="s" x="990" y="230">DB 저장 대기 이벤트</text>
+
+  <line class="sync" x1="870" y1="140" x2="870" y2="178" marker-end="url(#a)"/>
+  <line class="sync" x1="1050" y1="140" x2="1050" y2="178" marker-end="url(#a)"/>
+
+  <line class="sync" x1="700" y1="100" x2="788" y2="100" marker-end="url(#a)"/>
+
+  <!-- 비동기 저장 -->
+  <rect class="box" x="950" y="390" width="200" height="80" rx="10"/>
+  <rect x="950" y="390" width="6" height="80" rx="3" fill="#6db33f"/>
+  <text class="t" x="972" y="424">Stream 컨슈머</text>
+  <text class="s" x="972" y="448">500건 또는 3초마다 배치</text>
+
+  <rect class="box" x="500" y="390" width="200" height="80" rx="10"/>
+  <rect x="500" y="390" width="6" height="80" rx="3" fill="#4479a1"/>
+  <text class="t" x="522" y="424">MySQL 8.0</text>
+  <text class="s" x="522" y="448">발급 · 상태 이력 · Outbox</text>
+
+  <rect class="box" x="40" y="390" width="170" height="80" rx="10"/>
+  <rect x="40" y="390" width="6" height="80" rx="3" fill="#8c959f"/>
+  <text class="t" x="62" y="424">발급 알림</text>
+  <text class="s" x="62" y="448">Mock 발송</text>
+
+  <rect class="box" x="950" y="540" width="200" height="80" rx="10"/>
+  <rect x="950" y="540" width="6" height="80" rx="3" fill="#dc382d"/>
+  <text class="t" x="972" y="574">DLQ 재처리</text>
+  <text class="s" x="972" y="598">10회 넘으면 관리자 알림</text>
+
+  <line class="async" x1="1050" y1="244" x2="1050" y2="388" marker-end="url(#a)"/>
+  <text class="l" x="1062" y="364">이벤트 읽기</text>
+
+  <line class="async" x1="950" y1="430" x2="702" y2="430" marker-end="url(#a)"/>
+  <text class="l" x="826" y="418" text-anchor="middle">배치 INSERT · 커밋 후 ACK</text>
+
+  <line class="async" x1="500" y1="430" x2="212" y2="430" marker-end="url(#a)"/>
+  <text class="l" x="356" y="418" text-anchor="middle">커밋 뒤 발송</text>
+
+  <line class="async" x1="1050" y1="470" x2="1050" y2="538" marker-end="url(#a)"/>
+  <text class="l" x="1062" y="510">3회 넘게 실패</text>
+
+  <polyline class="async" points="950,580 600,580 600,472" marker-end="url(#a)"/>
+  <text class="l" x="775" y="568" text-anchor="middle">최종 실패 기록</text>
+
+  <!-- 범례 -->
+  <line class="sync" x1="40" y1="590" x2="80" y2="590"/>
+  <text class="l" x="90" y="594">요청 처리</text>
+  <line class="async" x1="170" y1="590" x2="210" y2="590"/>
+  <text class="l" x="220" y="594">비동기 저장</text>
+</svg>
