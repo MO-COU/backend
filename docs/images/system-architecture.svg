@@ -36,7 +36,7 @@
   <line class="sync" x1="440" y1="100" x2="498" y2="100" marker-end="url(#a)"/>
 
   <!-- Redis -->
-  <text class="g" x="790" y="44">Redis 8.8</text>
+  <text class="g" x="790" y="44">Redis</text>
   <text class="l" x="1130" y="44" text-anchor="end">AOF appendfsync always</text>
 
   <rect class="box" x="790" y="60" width="340" height="80" rx="10"/>
@@ -67,7 +67,7 @@
 
   <rect class="box" x="500" y="390" width="200" height="80" rx="10"/>
   <rect x="500" y="390" width="6" height="80" rx="3" fill="#4479a1"/>
-  <text class="t" x="522" y="424">MySQL 8.0</text>
+  <text class="t" x="522" y="424">MySQL</text>
   <text class="s" x="522" y="448">발급 · 상태 이력 · Outbox</text>
 
   <rect class="box" x="40" y="390" width="170" height="80" rx="10"/>
